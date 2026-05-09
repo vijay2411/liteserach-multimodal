@@ -54,16 +54,21 @@ class Engine:
         fetch_limit = opts.limit * OVERFETCH
 
         rank_lists: list[list[SearchResult]] = []
+        mode_labels: list[str] = []
 
         if opts.mode in ("filename", "hybrid"):
             try:
-                rank_lists.append(search_filename(self.conn, query, limit=fetch_limit))
+                hits = search_filename(self.conn, query, limit=fetch_limit)
+                rank_lists.append(hits)
+                mode_labels.append("filename")
             except Exception as e:
                 log.warning("filename search failed: %s", e)
 
         if opts.mode in ("grep", "hybrid"):
             try:
-                rank_lists.append(search_grep(self.conn, query, limit=fetch_limit))
+                hits = search_grep(self.conn, query, limit=fetch_limit)
+                rank_lists.append(hits)
+                mode_labels.append("grep")
             except Exception as e:
                 log.warning("grep search failed: %s", e)
 
@@ -71,16 +76,18 @@ class Engine:
             text_hits = self._semantic_text(query, fetch_limit)
             if text_hits:
                 rank_lists.append(text_hits)
+                mode_labels.append("semantic")
             if opts.vision and self.router.vision is not None:
                 vision_hits = self._semantic_vision(query, fetch_limit)
                 if vision_hits:
                     rank_lists.append(vision_hits)
+                    mode_labels.append("vision")
 
         if not rank_lists:
             return []
 
         if opts.mode == "hybrid":
-            results = reciprocal_rank_fusion(rank_lists, limit=fetch_limit)
+            results = reciprocal_rank_fusion(rank_lists, limit=fetch_limit, mode_labels=mode_labels)
         else:
             results = rank_lists[0]
 

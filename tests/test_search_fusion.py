@@ -35,3 +35,36 @@ def test_rrf_respects_limit():
     rs = [[_r(i, i * 10, "semantic") for i in range(1, 30)]]
     out = reciprocal_rank_fusion(rs, limit=5)
     assert len(out) == 5
+
+
+def _r_typed(file_id, chunk_id, mode, file_type, path="/x/foo"):
+    return SearchResult(
+        path=path, modality="text", mode=mode,
+        score=0.5, file_id=file_id, chunk_id=chunk_id,
+        metadata={"file_type": file_type},
+    )
+
+
+def test_rrf_weighted_boosts_grep_for_code():
+    """For a .py file, grep contribution should outweigh semantic of equal rank."""
+    code_grep = [_r_typed(1, 11, "grep", "text", "/x/foo.py")]
+    code_semantic = [_r_typed(2, 22, "semantic", "text", "/x/foo.py")]
+    out = reciprocal_rank_fusion(
+        [code_grep, code_semantic],
+        mode_labels=["grep", "semantic"],
+    )
+    # Both files appear; the one whose mode matches the code profile wins.
+    assert out[0].file_id == 1
+
+
+def test_rrf_weighted_excludes_grep_for_image():
+    """For images, grep weight is 0 — grep results vanish from the fused output."""
+    img_grep = [_r_typed(1, 11, "grep", "image", "/x/foo.png")]
+    img_filename = [_r_typed(2, 22, "filename", "image", "/x/bar.png")]
+    out = reciprocal_rank_fusion(
+        [img_grep, img_filename],
+        mode_labels=["grep", "filename"],
+    )
+    paths = [r.path for r in out]
+    assert "/x/foo.png" not in paths
+    assert "/x/bar.png" in paths
