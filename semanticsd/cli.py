@@ -79,6 +79,14 @@ def _client() -> httpx.Client:
 @ssearch_app.callback(invoke_without_command=True)
 def ssearch_root(
     ctx: typer.Context,
+    query: list[str] = typer.Argument(None, help="Search query (positional, multi-word ok)"),
+    mode: str = typer.Option("hybrid", "--mode", help="hybrid|semantic|filename|grep"),
+    semantic: bool = typer.Option(False, "--semantic", help="Shortcut for --mode=semantic"),
+    filename: bool = typer.Option(False, "--filename", help="Shortcut for --mode=filename"),
+    grep: bool = typer.Option(False, "--grep", help="Shortcut for --mode=grep"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+    all_scope: bool = typer.Option(False, "--all", help="Search whole corpus, not just CWD"),
+    no_vision: bool = typer.Option(False, "--no-vision", help="Disable cross-modal vision search"),
     status: bool = typer.Option(False, "--status", help="Show daemon status."),
     presets: bool = typer.Option(False, "--presets", help="List available embedder presets."),
     test_embedder: str = typer.Option(
@@ -183,7 +191,60 @@ def ssearch_root(
                 typer.echo(f"unchanged: {body['files_skipped_unchanged']} files")
         return
 
+    if query:
+        q = " ".join(query)
+        if semantic:
+            mode = "semantic"
+        elif filename:
+            mode = "filename"
+        elif grep:
+            mode = "grep"
+        if mode not in ("hybrid", "semantic", "filename", "grep"):
+            typer.echo(f"ERROR: unknown mode {mode!r}", err=True)
+            raise typer.Exit(2)
+
+        from pathlib import Path as _P
+        params = {
+            "q": q,
+            "mode": mode,
+            "limit": limit,
+            "all": "true" if all_scope else "false",
+            "vision": "false" if no_vision else "true",
+        }
+        if not all_scope:
+            params["cwd"] = str(_P.cwd().resolve())
+
+        try:
+            with _client() as c:
+                r = c.get("/v1/search", params=params, timeout=60.0)
+                r.raise_for_status()
+                body = r.json()
+        except httpx.HTTPError as e:
+            typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+            raise typer.Exit(3)
+
+        if json_output:
+            typer.echo(json.dumps(body, indent=2))
+            return
+
+        results = body.get("results", [])
+        if not results:
+            typer.echo(f"No matches for {q!r} (mode={mode}, took {body.get('took_ms', 0)}ms).")
+            return
+        for r in results:
+            modes = r.get("metadata", {}).get("contributing_modes")
+            mode_label = "+".join(sorted(set(modes))) if modes else r.get("mode", "?")
+            line = f"{r['path']}  ({mode_label}, {r['modality']}, score={r['score']:.3f})"
+            typer.echo(line)
+            if r.get("snippet"):
+                snip = r["snippet"]
+                # Indent + dim-ish prefix for the snippet
+                for sl in snip.splitlines() or [snip]:
+                    typer.echo(f"  {sl}")
+            typer.echo("")
+        typer.echo(f"-- {len(results)} results in {body.get('took_ms', 0)}ms --")
+        return
+
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: ssearch [QUERY] | --status | --presets | --test-embedder PRESET | --index PATH")
-        typer.echo("Search subcommands land in Plan 5.")
         raise typer.Exit(0)
