@@ -8,7 +8,7 @@ PLIST_PATH="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 
 case "${1:-}" in
   --uninstall)
-    echo "Uninstalling SemanticsD…"
+    echo "Uninstalling SemanticsD..."
     if [[ -f "$PLIST_PATH" ]]; then
       launchctl bootout "gui/$(id -u)" "$PLIST_PATH" || true
       rm -f "$PLIST_PATH"
@@ -43,7 +43,7 @@ fi
 
 # 3. venv
 if [[ ! -d "$VENV_DIR" ]]; then
-  echo "Creating venv at $VENV_DIR…"
+  echo "Creating venv at ${VENV_DIR}..."
   python3 -m venv "$VENV_DIR"
 fi
 "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
@@ -56,7 +56,7 @@ fi
 # 5. wait for /v1/health
 PORT=$("$VENV_DIR/bin/python" -c "from semanticsd import config; print(config.load().daemon.http_port)")
 TOKEN=$("$VENV_DIR/bin/python" -m semanticsd token print)
-echo "Waiting for daemon on :$PORT…"
+echo "Waiting for daemon on :${PORT}..."
 for i in {1..30}; do
   if curl -s -H "X-Auth-Token: $TOKEN" "http://127.0.0.1:$PORT/v1/health" >/dev/null 2>&1; then
     echo "  ready."
