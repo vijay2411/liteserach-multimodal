@@ -1,14 +1,20 @@
-"""Job-queue worker."""
+"""Job-queue worker — modality-aware routing via EmbedderRouter."""
 from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
 import struct
 import time
-from semanticsd.embedders.base import Embedder
+from collections import defaultdict
+from semanticsd.embedders.router import EmbedderRouter
 from semanticsd.pipeline.hasher import find_existing_embedding
 
 log = logging.getLogger(__name__)
+
+VEC_TABLE_BY_MODALITY = {
+    "text": "vec_text_embeddings",
+    "vision": "vec_vision_embeddings",
+}
 
 
 def _vec_to_blob(vec: list[float]) -> bytes:
@@ -16,9 +22,15 @@ def _vec_to_blob(vec: list[float]) -> bytes:
 
 
 class Worker:
-    def __init__(self, conn: sqlite3.Connection, embedder: Embedder, batch_size: int = 128, max_attempts: int = 5):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        router: EmbedderRouter,
+        batch_size: int = 128,
+        max_attempts: int = 5,
+    ):
         self.conn = conn
-        self.embedder = embedder
+        self.router = router
         self.batch_size = batch_size
         self.max_attempts = max_attempts
 
@@ -27,87 +39,123 @@ class Worker:
 
     def drain_once(self) -> int:
         rows = self.conn.execute(
-            "SELECT j.id, j.chunk_id, c.text, c.content_hash "
+            "SELECT j.id, j.chunk_id, c.text, c.content_hash, c.modality, c.image_blob "
             "FROM jobs j JOIN chunks c ON c.id = j.chunk_id "
-            "WHERE j.status = 'pending' "
+            "WHERE j.status='pending' "
             "ORDER BY j.id LIMIT ?",
             (self.batch_size,),
         ).fetchall()
         if not rows:
             return 0
 
-        job_ids = [int(r[0]) for r in rows]
-        placeholders = ",".join("?" for _ in job_ids)
+        all_job_ids = [int(r[0]) for r in rows]
+        ph_all = ",".join("?" for _ in all_job_ids)
         self.conn.execute(
-            f"UPDATE jobs SET status='in_flight', updated_at=? WHERE id IN ({placeholders})",
-            [int(time.time()), *job_ids],
+            f"UPDATE jobs SET status='in_flight', updated_at=? WHERE id IN ({ph_all})",
+            [int(time.time()), *all_job_ids],
         )
 
-        to_embed: list[tuple[int, int, str, str]] = []
+        groups: dict[str, list] = defaultdict(list)
+        for r in rows:
+            modality = r[4] or "text"
+            groups[modality].append(r)
+
+        processed = 0
+        for modality, group in groups.items():
+            embedder = self.router.get(modality)
+            if embedder is None:
+                ids = [int(r[0]) for r in group]
+                log.warning(
+                    "no embedder configured for modality=%s; %d jobs skipped",
+                    modality, len(ids),
+                )
+                self._mark_failed(ids, f"no_embedder_for_modality:{modality}")
+                continue
+            try:
+                processed += self._process_group(modality, embedder, group)
+            except Exception as e:
+                log.warning("group %s failed: %s", modality, e)
+                self._mark_failed([int(r[0]) for r in group], str(e))
+
+        return processed
+
+    def _process_group(self, modality: str, embedder, group) -> int:
+        vec_table = VEC_TABLE_BY_MODALITY[modality]
+        to_embed: list[tuple[int, int, str, str, bytes | None]] = []
         cached: list[tuple[int, int, int]] = []
-        for jid, cid, text, chash in rows:
-            existing_chunk_id = find_existing_embedding(
+
+        for jid, cid, text, chash, _m, blob in group:
+            existing_cid = find_existing_embedding(
                 self.conn,
                 content_hash=chash,
-                provider_id=self.embedder.provider_id,
-                model_id=self.embedder.model_id,
-                dim=self.embedder.dim,
+                provider_id=embedder.provider_id,
+                model_id=embedder.model_id,
+                dim=embedder.dim,
             )
-            if existing_chunk_id is not None and int(existing_chunk_id) != int(cid):
-                cached.append((int(jid), int(cid), int(existing_chunk_id)))
+            if existing_cid is not None and int(existing_cid) != int(cid):
+                cached.append((int(jid), int(cid), int(existing_cid)))
             else:
-                to_embed.append((int(jid), int(cid), text, chash))
+                to_embed.append((int(jid), int(cid), text, chash, blob))
 
         if to_embed:
-            try:
-                texts = [t[2] for t in to_embed]
-                result = self.embedder.embed(texts, kind="doc")
-            except Exception as e:
-                log.warning("embedder failed: %s", e)
-                self._mark_failed(job_ids, str(e))
-                return 0
-            for (jid, cid, _t, chash), vec in zip(to_embed, result.vectors):
+            if modality == "text":
+                inputs = [t[2] for t in to_embed]
+                result = embedder.embed(inputs, kind="doc")
+            else:  # vision
+                inputs = [t[4] for t in to_embed]
+                result = embedder.embed_images(inputs, kind="doc")
+            for (jid, cid, _t, chash, _b), vec in zip(to_embed, result.vectors):
                 self.conn.execute(
-                    "INSERT OR REPLACE INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                    f"INSERT OR REPLACE INTO {vec_table}(rowid, embedding) VALUES (?, ?)",
                     (cid, _vec_to_blob(list(vec))),
                 )
                 self.conn.execute(
-                    "INSERT OR REPLACE INTO embedding_meta(chunk_id, provider_id, model_id, dim, content_hash) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (cid, self.embedder.provider_id, self.embedder.model_id, self.embedder.dim, chash),
+                    "INSERT OR REPLACE INTO embedding_meta"
+                    "(chunk_id, provider_id, model_id, dim, content_hash, modality) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (cid, embedder.provider_id, embedder.model_id,
+                     embedder.dim, chash, modality),
                 )
 
         for jid, target_cid, source_cid in cached:
             row = self.conn.execute(
-                "SELECT embedding FROM vec_embeddings WHERE rowid = ?", (source_cid,)
+                f"SELECT embedding FROM {vec_table} WHERE rowid=?", (source_cid,)
             ).fetchone()
             if row is None:
                 continue
             self.conn.execute(
-                "INSERT OR REPLACE INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                f"INSERT OR REPLACE INTO {vec_table}(rowid, embedding) VALUES (?, ?)",
                 (target_cid, row[0]),
             )
             row2 = self.conn.execute(
-                "SELECT content_hash FROM embedding_meta WHERE chunk_id = ?", (source_cid,)
+                "SELECT content_hash FROM embedding_meta WHERE chunk_id=?",
+                (source_cid,),
             ).fetchone()
             chash = row2[0] if row2 else ""
             self.conn.execute(
-                "INSERT OR REPLACE INTO embedding_meta(chunk_id, provider_id, model_id, dim, content_hash) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (target_cid, self.embedder.provider_id, self.embedder.model_id, self.embedder.dim, chash),
+                "INSERT OR REPLACE INTO embedding_meta"
+                "(chunk_id, provider_id, model_id, dim, content_hash, modality) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (target_cid, embedder.provider_id, embedder.model_id,
+                 embedder.dim, chash, modality),
             )
 
-        self.conn.execute(
-            f"UPDATE jobs SET status='done', updated_at=? WHERE id IN ({placeholders})",
-            [int(time.time()), *job_ids],
-        )
-        return len(job_ids)
+        ids = [int(t[0]) for t in to_embed] + [int(c[0]) for c in cached]
+        if ids:
+            ph = ",".join("?" for _ in ids)
+            self.conn.execute(
+                f"UPDATE jobs SET status='done', updated_at=? WHERE id IN ({ph})",
+                [int(time.time()), *ids],
+            )
+        return len(ids)
 
     def _mark_failed(self, job_ids: list[int], error: str) -> None:
-        placeholders = ",".join("?" for _ in job_ids)
+        if not job_ids:
+            return
+        ph = ",".join("?" for _ in job_ids)
         self.conn.execute(
-            f"UPDATE jobs SET status='pending', attempts = attempts + 1, "
-            f"last_error = ?, updated_at = ? WHERE id IN ({placeholders})",
+            f"UPDATE jobs SET status='pending', attempts=attempts+1, "
+            f"last_error=?, updated_at=? WHERE id IN ({ph})",
             [error, int(time.time()), *job_ids],
         )
         self.conn.execute(
