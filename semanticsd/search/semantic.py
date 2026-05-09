@@ -7,9 +7,26 @@ from semanticsd.search.types import SearchResult
 
 log = logging.getLogger(__name__)
 
+# Chunks shorter than this (after stripping) aren't worth ranking — empty
+# JSON files, single-line dotfiles, etc. dominate semantic results because
+# their near-zero vectors are close to almost any query.
+MIN_TEXT_LEN = 20
+
 
 def _vec_to_blob(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
+
+
+def _l2_to_cosine(l2_dist: float) -> float:
+    """Convert sqlite-vec's L2 distance to cosine similarity, assuming the
+    stored vectors are unit-normalized (Ollama embeddinggemma, Gemini
+    Embedding 2, Qwen3-VL-Embedding all normalize their outputs).
+
+    For unit vectors |a-b|² = 2 - 2·cos(a,b), so cos = 1 - L2²/2. Result
+    is in [-1, 1] in theory; for embeddings of real-world text it's
+    typically in [0.4, 1.0].
+    """
+    return 1.0 - (l2_dist * l2_dist) / 2.0
 
 
 def _vision_vec_tables_for_dim(conn: sqlite3.Connection, dim: int) -> list[str]:
@@ -41,6 +58,7 @@ def search_semantic_text(
     if not query_vec:
         return []
     blob = _vec_to_blob(query_vec)
+    # Over-fetch since we'll drop short / near-empty rows below.
     rows = conn.execute(
         """
         SELECT v.rowid, v.distance, c.file_id, c.text, c.byte_start, c.byte_end,
@@ -49,16 +67,17 @@ def search_semantic_text(
         JOIN chunks c ON c.id = v.rowid
         JOIN files  f ON f.id = c.file_id
         WHERE v.embedding MATCH ? AND k = ?
+          AND length(trim(c.text)) >= ?
         ORDER BY v.distance
         """,
-        (blob, limit),
+        (blob, limit * 2, MIN_TEXT_LEN),
     ).fetchall()
     return [
         SearchResult(
             path=str(row[7]),
             modality="text",
             mode="semantic",
-            score=1.0 - float(row[1]),  # convert L2 distance to similarity-ish
+            score=_l2_to_cosine(float(row[1])),
             chunk_id=int(row[0]),
             file_id=int(row[2]),
             snippet=str(row[3]),
@@ -66,7 +85,7 @@ def search_semantic_text(
             byte_end=int(row[5]),
             metadata={"file_type": row[8]},
         )
-        for row in rows
+        for row in rows[:limit]
     ]
 
 
@@ -111,7 +130,7 @@ def search_semantic_vision(
                 path=str(row[6]),
                 modality="vision",
                 mode="semantic",
-                score=1.0 - float(row[1]),
+                score=_l2_to_cosine(float(row[1])),
                 chunk_id=int(row[0]),
                 file_id=int(row[2]),
                 snippet=str(row[3]),

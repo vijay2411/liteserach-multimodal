@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from semanticsd.search.types import SearchResult
 
+MIN_TEXT_LEN = 20  # mirror semantic.py — drop trivial chunks
+
 
 def search_grep(
     conn: sqlite3.Connection,
@@ -12,7 +14,8 @@ def search_grep(
     """Return chunk-level matches via FTS over chunk text.
 
     Vision chunks are excluded — their text field is just a synthetic
-    "<image: ...>" descriptor, useless for grep-style search.
+    "<image: ...>" descriptor, useless for grep-style search. Trivially
+    short chunks (e.g. `{}`) are also dropped.
     """
     rows = conn.execute(
         """
@@ -21,11 +24,13 @@ def search_grep(
         FROM fts_chunks
         JOIN chunks c ON c.id = fts_chunks.rowid
         JOIN files  f ON f.id = c.file_id
-        WHERE fts_chunks MATCH ? AND c.modality = 'text'
+        WHERE fts_chunks MATCH ?
+          AND c.modality = 'text'
+          AND length(trim(c.text)) >= ?
         ORDER BY fts_chunks.rank
         LIMIT ?
         """,
-        (query, limit),
+        (query, MIN_TEXT_LEN, limit),
     ).fetchall()
     return [
         SearchResult(

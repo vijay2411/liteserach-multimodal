@@ -40,9 +40,9 @@ def test_semantic_text_returns_nearest(tmp_path):
     v_far = [-1.0] + [0.0] * 767
     v_other = [0.0, 1.0] + [0.0] * 766
 
-    _seed_text_chunk(conn, 1, 1, "/x/a.md", "alpha", v_close)
-    _seed_text_chunk(conn, 2, 2, "/x/b.md", "beta", v_far)
-    _seed_text_chunk(conn, 3, 3, "/x/c.md", "gamma", v_other)
+    _seed_text_chunk(conn, 1, 1, "/x/a.md", "alpha contents about foxes", v_close)
+    _seed_text_chunk(conn, 2, 2, "/x/b.md", "beta contents about cats and dogs", v_far)
+    _seed_text_chunk(conn, 3, 3, "/x/c.md", "gamma contents about lazy mornings", v_other)
 
     results = search_semantic_text(conn, query_vec=v_close, limit=3)
     assert len(results) == 3
@@ -97,3 +97,38 @@ def test_semantic_vision_returns_results(tmp_path):
     assert len(results) == 1
     assert results[0].modality == "vision"
     assert results[0].metadata["vec_table"] == "vec_vision_embeddings_2048"
+
+
+def test_semantic_drops_short_chunks(tmp_path):
+    """Chunks below MIN_TEXT_LEN should not surface even when vec MATCH ranks them top."""
+    db = tmp_path / "s.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+
+    v = [1.0] + [0.0] * 767
+    _seed_text_chunk(conn, 1, 1, "/x/empty.json", "{}", v)  # 2 chars
+    _seed_text_chunk(conn, 2, 2, "/x/real.md", "this is a real document about something interesting", v)
+
+    results = search_semantic_text(conn, query_vec=v, limit=5)
+    paths = [r.path for r in results]
+    assert "/x/empty.json" not in paths
+    assert "/x/real.md" in paths
+
+
+def test_semantic_score_is_cosine_in_zero_to_one(tmp_path):
+    """For unit-normalized vectors, score should be in [0, 1] not the
+    legacy 1 - L2 (which can go negative)."""
+    db = tmp_path / "s.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+    v_a = [1.0] + [0.0] * 767
+    v_b = [0.0, 1.0] + [0.0] * 766
+    _seed_text_chunk(conn, 1, 1, "/x/a.md", "first document about quantum mechanics", v_a)
+    _seed_text_chunk(conn, 2, 2, "/x/b.md", "second document about classical music", v_b)
+
+    results = search_semantic_text(conn, query_vec=v_a, limit=5)
+    assert len(results) == 2
+    # Top result is identical -> cos_sim = 1.0
+    assert results[0].score > 0.99
+    # Second is orthogonal -> cos_sim ≈ 0.0
+    assert -0.01 < results[1].score < 0.01

@@ -30,8 +30,8 @@ def test_grep_finds_text_chunks(tmp_path):
     conn = connection.get_connection(db)
     migrations.apply(conn)
     _seed_file(conn, 1, "/x/notes.md")
-    _seed_chunk(conn, 1, 1, "the quick brown fox")
-    _seed_chunk(conn, 2, 1, "the lazy dog sleeps")
+    _seed_chunk(conn, 1, 1, "the quick brown fox jumped")
+    _seed_chunk(conn, 2, 1, "the lazy dog sleeps quietly")
 
     results = search_grep(conn, "fox", limit=5)
     assert len(results) == 1
