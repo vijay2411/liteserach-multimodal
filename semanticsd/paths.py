@@ -7,18 +7,24 @@ from pathlib import Path
 LAUNCHD_LABEL = "com.semanticsd"
 
 
+def _home() -> Path | None:
+    """Return the $SEMANTICSD_HOME override path, or None if not set."""
+    override = os.environ.get("SEMANTICSD_HOME")
+    return Path(override) if override else None
+
+
 def app_support() -> Path:
     """Application Support directory. Honors $SEMANTICSD_HOME for tests."""
-    override = os.environ.get("SEMANTICSD_HOME")
-    if override:
-        return Path(override)
+    home = _home()
+    if home:
+        return home
     return Path.home() / "Library" / "Application Support" / "semanticsd"
 
 
 def logs_dir() -> Path:
-    override = os.environ.get("SEMANTICSD_HOME")
-    if override:
-        return Path(override) / "logs"
+    home = _home()
+    if home:
+        return home / "logs"
     return Path.home() / "Library" / "Logs" / "semanticsd"
 
 
@@ -35,9 +41,9 @@ def models_dir() -> Path:
 
 
 def launch_agent_plist() -> Path:
-    override = os.environ.get("SEMANTICSD_HOME")
-    if override:
-        return Path(override) / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+    home = _home()
+    if home:
+        return home / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
     return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
 
 

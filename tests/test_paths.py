@@ -30,7 +30,13 @@ def test_launch_agent_plist_path(monkeypatch):
     assert paths.launch_agent_plist() == Path.home() / "Library" / "LaunchAgents" / "com.semanticsd.plist"
 
 
+def test_logs_dir_override(tmp_app_support):
+    assert paths.logs_dir() == tmp_app_support / "logs"
+
+
 def test_ensure_dirs_creates(tmp_app_support):
     paths.ensure_dirs()
     assert tmp_app_support.exists()
+    assert (tmp_app_support / "logs").exists()
     assert (tmp_app_support / "models").exists()
+    assert (tmp_app_support / "LaunchAgents").exists()
