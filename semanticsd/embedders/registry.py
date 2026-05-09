@@ -14,6 +14,7 @@ from semanticsd.embedders.ollama import OllamaEmbedder
 from semanticsd.embedders.openai_compatible import OpenAICompatibleEmbedder
 from semanticsd.embedders.gemini import GeminiTextEmbedder
 from semanticsd.embedders.gemini_vision import GeminiVisionEmbedder
+from semanticsd.embedders.qwen3_vl import LocalQwen3VisionEmbedder
 
 
 PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
@@ -86,10 +87,17 @@ VISION_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "needs_api_key": True,
         "needs_base_url": False,
     },
+    "qwen3_vl_local": {
+        "class": "LocalQwen3VisionEmbedder",
+        "default_model": "Qwen/Qwen3-VL-Embedding-2B",
+        "needs_api_key": False,
+        "needs_base_url": False,
+    },
 }
 
 _VISION_CLASS_BY_NAME: dict[str, Type[VisionEmbedder]] = {
     "GeminiVisionEmbedder": GeminiVisionEmbedder,
+    "LocalQwen3VisionEmbedder": LocalQwen3VisionEmbedder,
 }
 
 
@@ -161,6 +169,10 @@ def build_vision_embedder(preset: str, config: dict[str, Any]) -> VisionEmbedder
     if cls is GeminiVisionEmbedder:
         return GeminiVisionEmbedder(
             api_key=config["api_key"],
+            model=config.get("model") or entry["default_model"],
+        )
+    if cls is LocalQwen3VisionEmbedder:
+        return LocalQwen3VisionEmbedder(
             model=config.get("model") or entry["default_model"],
         )
     raise ValueError(f"no factory branch for vision class {entry['class']!r}")

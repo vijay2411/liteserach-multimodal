@@ -7,6 +7,7 @@ from semanticsd.embedders.openai import OpenAIEmbedder
 from semanticsd.embedders.ollama import OllamaEmbedder
 from semanticsd.embedders.gemini import GeminiTextEmbedder
 from semanticsd.embedders.gemini_vision import GeminiVisionEmbedder
+from semanticsd.embedders.qwen3_vl import LocalQwen3VisionEmbedder
 from semanticsd.embedders.registry import (
     PROVIDER_REGISTRY,
     VISION_PROVIDER_REGISTRY,
@@ -25,6 +26,7 @@ __all__ = [
     "OllamaEmbedder",
     "GeminiTextEmbedder",
     "GeminiVisionEmbedder",
+    "LocalQwen3VisionEmbedder",
     "PROVIDER_REGISTRY",
     "VISION_PROVIDER_REGISTRY",
     "build_embedder",

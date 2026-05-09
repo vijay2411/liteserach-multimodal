@@ -11,14 +11,28 @@ from semanticsd.pipeline.hasher import find_existing_embedding
 
 log = logging.getLogger(__name__)
 
-VEC_TABLE_BY_MODALITY = {
-    "text": "vec_text_embeddings",
-    "vision": "vec_vision_embeddings",
-}
-
-
 def _vec_to_blob(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
+
+
+def _vec_table_for(modality: str, dim: int) -> str:
+    """Vec table name keyed by (modality, dim). Multiple providers per modality
+    coexist in their own dim-keyed tables; switching provider is non-destructive
+    if the new dim differs."""
+    if modality == "text":
+        # 768-d default text providers (ollama embeddinggemma, nomic) share the
+        # canonical table; non-default dims get their own table.
+        return "vec_text_embeddings" if dim == 768 else f"vec_text_embeddings_{dim}"
+    if modality == "vision":
+        return "vec_vision_embeddings" if dim == 3072 else f"vec_vision_embeddings_{dim}"
+    raise ValueError(f"unknown modality: {modality!r}")
+
+
+def _ensure_vec_table(conn, table: str, dim: int) -> None:
+    """Idempotent CREATE for a per-(modality, dim) vec0 table."""
+    conn.execute(
+        f"CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING vec0(embedding FLOAT[{dim}])"
+    )
 
 
 class Worker:
@@ -80,7 +94,8 @@ class Worker:
         return processed
 
     def _process_group(self, modality: str, embedder, group) -> int:
-        vec_table = VEC_TABLE_BY_MODALITY[modality]
+        vec_table = _vec_table_for(modality, embedder.dim)
+        _ensure_vec_table(self.conn, vec_table, embedder.dim)
         to_embed: list[tuple[int, int, str, str, bytes | None]] = []
         cached: list[tuple[int, int, int]] = []
 

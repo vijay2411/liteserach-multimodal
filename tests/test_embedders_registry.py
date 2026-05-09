@@ -106,3 +106,15 @@ def test_build_vision_requires_key():
 def test_build_vision_unknown_preset():
     with pytest.raises(ValueError):
         registry.build_vision_embedder("nope", {"api_key": "k"})
+
+
+def test_qwen3_vl_in_vision_registry():
+    assert "qwen3_vl_local" in registry.VISION_PROVIDER_REGISTRY
+    e = registry.VISION_PROVIDER_REGISTRY["qwen3_vl_local"]
+    assert e["needs_api_key"] is False
+
+
+def test_build_qwen3_vl_local():
+    e = registry.build_vision_embedder("qwen3_vl_local", {})
+    assert e.provider_id == "qwen3_vl_local"
+    assert e.dim == 2048
