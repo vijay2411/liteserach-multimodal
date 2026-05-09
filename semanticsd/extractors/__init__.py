@@ -7,3 +7,4 @@ from semanticsd.extractors import xlsx  # noqa: F401
 from semanticsd.extractors import pptx  # noqa: F401
 from semanticsd.extractors import epub  # noqa: F401
 from semanticsd.extractors import rtf  # noqa: F401
+from semanticsd.extractors import email_msg  # noqa: F401
