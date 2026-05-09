@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from semanticsd.extractors import registry as ext_registry
 from semanticsd.pipeline.chunker import SlidingWindowChunker, Chunk
-from semanticsd.pipeline.hasher import sha256_hex
+from semanticsd.pipeline.hasher import sha256_hex, sha256_bytes
 from semanticsd.pipeline.ignore import IgnoreMatcher
 from semanticsd.pipeline.walker import walk_indexable
 
@@ -125,12 +125,39 @@ class Indexer:
         chunks_created = 0
         jobs_queued = 0
         for seg in doc.segments:
-            cc, jq = self._chunk_segment_into_jobs(
-                file_id=file_id, text=seg.text, base_offset=seg.byte_start,
-            )
+            if seg.modality == "vision":
+                cc, jq = self._add_vision_chunk(file_id, seg)
+            else:
+                cc, jq = self._chunk_segment_into_jobs(
+                    file_id=file_id, text=seg.text, base_offset=seg.byte_start,
+                )
             chunks_created += cc
             jobs_queued += jq
         return {"chunks": chunks_created, "jobs": jobs_queued}
+
+    def _add_vision_chunk(self, file_id: int, seg) -> tuple[int, int]:
+        """Insert one chunk + one job for a vision segment (no sub-chunking)."""
+        if seg.image_data is None:
+            return 0, 0
+        chash = sha256_bytes(seg.image_data)
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(chunk_index), -1) FROM chunks WHERE file_id = ?",
+            (file_id,),
+        ).fetchone()
+        next_idx = int(row[0]) + 1
+        cur = self.conn.execute(
+            "INSERT INTO chunks(file_id, chunk_index, text, content_hash, byte_start, byte_end, modality, image_blob) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'vision', ?)",
+            (file_id, next_idx, seg.text, chash, seg.byte_start, seg.byte_end, seg.image_data),
+        )
+        chunk_id = int(cur.lastrowid)
+        now = int(time.time())
+        self.conn.execute(
+            "INSERT INTO jobs(chunk_id, status, attempts, created_at, updated_at) "
+            "VALUES (?, 'pending', 0, ?, ?)",
+            (chunk_id, now, now),
+        )
+        return 1, 1
 
     def _chunk_segment_into_jobs(self, file_id: int, text: str, base_offset: int) -> tuple[int, int]:
         chunks: list[Chunk] = self.chunker.chunk(text, base_byte_offset=base_offset)

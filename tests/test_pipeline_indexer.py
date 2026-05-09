@@ -69,3 +69,28 @@ def test_index_inline_creates_synthetic_path(tmp_path):
     row = conn.execute("SELECT path, file_type FROM files").fetchone()
     assert row[0] == "conversation://1"
     assert row[1] == "inline"
+
+
+def test_indexer_persists_vision_chunk_with_blob(tmp_app_support, tmp_path):
+    from semanticsd.db import connection, migrations
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd import paths
+    from tests._fixtures import make_image_with_text
+
+    paths.ensure_dirs()
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+
+    img_path = make_image_with_text(tmp_path, text="hi")
+    indexer = Indexer(conn)
+    stats = indexer.index_path(img_path)
+
+    assert stats["files_indexed"] == 1
+    rows = conn.execute(
+        "SELECT modality, image_blob, content_hash FROM chunks WHERE modality='vision'"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "vision"
+    assert rows[0][1] is not None
+    assert rows[0][1][:8].startswith(b"\x89PNG")
+    assert len(rows[0][2]) == 64  # sha256 hex
