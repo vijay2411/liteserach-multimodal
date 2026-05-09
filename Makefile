@@ -26,3 +26,11 @@ clean:
 
 uninstall:
 	bash scripts/install.sh --uninstall
+
+.PHONY: dev-sandbox
+
+dev-sandbox: install
+	SEMANTICSD_HOME=$(PWD)/sandbox/.semanticsd \
+	$(PYTHON) -c "from semanticsd import config, paths; paths.ensure_dirs(); \
+	open(paths.config_path(),'w').write(config.DEFAULT_TOML.replace('directories = []','directories = [\"$(PWD)/sandbox\"]'))" && \
+	SEMANTICSD_HOME=$(PWD)/sandbox/.semanticsd $(PYTHON) -m semanticsd serve
