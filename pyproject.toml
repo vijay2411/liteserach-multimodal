@@ -20,3 +20,4 @@ include = ["semanticsd*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["slow: marks tests that download models or hit the network"]
