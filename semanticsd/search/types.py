@@ -13,7 +13,8 @@ class SearchOptions(BaseModel):
     limit: int = 20
     cwd: Path | None = None
     all: bool = False
-    vision: bool = True  # cross-modal search; auto-disabled if no vision embedder
+    vision: bool = True   # cross-modal search; auto-disabled if no vision embedder
+    collapse: bool = True  # one result per file (top-scored chunk wins)
 
     model_config = {"arbitrary_types_allowed": True}
 

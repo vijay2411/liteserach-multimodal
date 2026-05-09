@@ -19,7 +19,12 @@ MIN_TEXT_LEN = 3
 # corpus: 0.40 keeps clear cross-modal hits (cat-image for cat-query at
 # cos=0.42) while still excluding random images that sit at cos~0.20.
 MIN_TEXT_COSINE = 0.50
-MIN_VISION_COSINE = 0.40
+# Cross-modal text→vision cosine: real-world Gemini scores typically sit
+# in [0.30, 0.45] even for clearly-relevant matches (a tshirt photo for
+# the query "shirt" hits ~0.34). 0.30 captures these while the per-file
+# RRF weights + the relative gap inherent to top-K ranking keep noise
+# from dominating.
+MIN_VISION_COSINE = 0.30
 
 
 def _vec_to_blob(vec: list[float]) -> bytes:

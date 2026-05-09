@@ -22,6 +22,7 @@ def search(
     cwd: str | None = Query(None, description="Restrict to files under this dir"),
     all: bool = Query(False, description="Disable CWD filter"),
     vision: bool = Query(True, description="Include cross-modal vision results"),
+    collapse: bool = Query(True, description="Collapse to one result per file"),
 ) -> dict[str, Any]:
     if mode not in ("semantic", "filename", "grep", "hybrid"):
         raise HTTPException(status_code=400, detail=f"unknown mode: {mode}")
@@ -36,6 +37,7 @@ def search(
         cwd=Path(cwd) if cwd else None,
         all=all,
         vision=vision,
+        collapse=collapse,
     )
     t0 = time.time()
     results = engine.search(q, opts)

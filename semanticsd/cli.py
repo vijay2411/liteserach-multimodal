@@ -119,6 +119,7 @@ def ssearch_root(
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
     all_scope: bool = typer.Option(False, "--all", help="Search whole corpus, not just CWD"),
     no_vision: bool = typer.Option(False, "--no-vision", help="Disable cross-modal vision search"),
+    chunks: bool = typer.Option(False, "--chunks", help="Show all matching chunks (default: collapse to one result per file)"),
     status: bool = typer.Option(False, "--status", help="Show daemon status."),
     presets: bool = typer.Option(False, "--presets", help="List available embedder presets."),
     test_embedder: str = typer.Option(
@@ -235,6 +236,7 @@ def ssearch_root(
             "--grep": "grep_flag",
             "--no-vision": "no_vision",
             "--json": "json_output",
+            "--chunks": "chunks",
         }
         cleaned: list[str] = []
         late_overrides: dict[str, bool | str | int] = {}
@@ -262,6 +264,7 @@ def ssearch_root(
         if "grep_flag" in late_overrides: grep = True
         if "no_vision" in late_overrides: no_vision = True
         if "json_output" in late_overrides: json_output = True
+        if "chunks" in late_overrides: chunks = True
         if "mode" in late_overrides: mode = late_overrides["mode"]
         if "limit" in late_overrides: limit = late_overrides["limit"]
 
@@ -286,6 +289,7 @@ def ssearch_root(
             "limit": limit,
             "all": "true" if all_scope else "false",
             "vision": "false" if no_vision else "true",
+            "collapse": "false" if chunks else "true",
         }
         if not all_scope:
             params["cwd"] = str(_P.cwd().resolve())
@@ -310,7 +314,10 @@ def ssearch_root(
         for r in results:
             modes = r.get("metadata", {}).get("contributing_modes")
             mode_label = "+".join(sorted(set(modes))) if modes else r.get("mode", "?")
-            line = f"{r['path']}  ({mode_label}, {r['modality']}, score={r['score']:.3f})"
+            extra = r.get("metadata", {}).get("additional_matches", 0)
+            extra_str = f"  (+{extra} more chunks)" if extra else ""
+            line = (f"{r['path']}  ({mode_label}, {r['modality']}, "
+                    f"score={r['score']:.3f}){extra_str}")
             typer.echo(line)
             if r.get("snippet"):
                 snip = r["snippet"]

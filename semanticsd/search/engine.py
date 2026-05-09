@@ -16,7 +16,7 @@ from semanticsd.usage.recorder import UsageEvent, record_usage, compute_cost
 
 log = logging.getLogger(__name__)
 
-OVERFETCH = 3  # over-fetch this multiple before applying CWD filter
+OVERFETCH = 6  # over-fetch this multiple before CWD-filter + collapse-by-file
 
 # Floor for the *raw* fused score (pre-normalization). Below this we
 # don't believe any of the matches are meaningful — return empty rather
@@ -100,10 +100,38 @@ class Engine:
         else:
             results = rank_lists[0]
 
-        results = self._cwd_filter(results, opts)[: opts.limit]
+        results = self._cwd_filter(results, opts)
+        if opts.collapse:
+            results = self._collapse_by_file(results)
+        results = results[: opts.limit]
         results = self._normalize_scores(results, apply_floor=is_hybrid)
         results = self._enrich_snippets(results, query)
         return results
+
+    def _collapse_by_file(self, results: list[SearchResult]) -> list[SearchResult]:
+        """Keep the highest-scored chunk per file_id. Adds metadata
+        `additional_matches` to indicate how many other chunks of the same
+        file also matched (useful for "+ N more matches" in CLI output)."""
+        best: dict[int, SearchResult] = {}
+        counts: dict[int, int] = {}
+        order: list[int] = []
+        for r in results:
+            counts[r.file_id] = counts.get(r.file_id, 0) + 1
+            if r.file_id not in best or r.score > best[r.file_id].score:
+                best[r.file_id] = r
+            if r.file_id not in order:
+                order.append(r.file_id)
+        out: list[SearchResult] = []
+        for fid in order:
+            r = best[fid]
+            extra = counts[fid] - 1
+            if extra > 0:
+                r = r.model_copy(update={
+                    "metadata": {**r.metadata, "additional_matches": extra}
+                })
+            out.append(r)
+        out.sort(key=lambda x: -x.score)
+        return out
 
     def _normalize_scores(
         self, results: list[SearchResult], apply_floor: bool = False,
