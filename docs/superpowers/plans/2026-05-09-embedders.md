@@ -6,7 +6,9 @@
 
 **Architecture:** One file per embedder provider in `semanticsd/embedders/`, all deriving from `Embedder` ABC. Registry-driven factory selects implementation by preset id. `sqlite-vec` extension loaded into the connection. Default config ships with `directories = []` so a fresh install never auto-indexes anything until the user opts in. Sandbox harness keeps development off the user's `$HOME`.
 
-**Tech Stack:** Python 3.11+, FastAPI, sqlite-vec (vector store), pysqlite3-binary (sqlite build with extension support), sentence-transformers + torch (local embedder), OpenAI Python SDK (OpenAI-compatible HTTP transport), tiktoken (token estimation), pytest + monkeypatch (no respx — we mock SDK methods directly).
+**Tech Stack:** Python 3.11+ **with sqlite-extension support** (Homebrew `python@3.13` recommended; pyenv builds need `PYTHON_CONFIGURE_OPTS="--enable-loadable-sqlite-extensions"`), FastAPI, sqlite-vec (vector store, loaded into stdlib sqlite3), sentence-transformers + torch (local embedder), OpenAI Python SDK (OpenAI-compatible HTTP transport), tiktoken (token estimation), pytest + monkeypatch (no respx — we mock SDK methods directly).
+
+**Important — Python build requirement:** sqlite-vec requires `Connection.enable_load_extension`, which is only available if Python's sqlite3 module was compiled with `--enable-loadable-sqlite-extensions`. Apple's bundled Python and pyenv-default builds lack this. The fix during dev is recreating the venv with Homebrew Python 3.13 (`/opt/homebrew/bin/python3.13`). This requirement is documented in `install.sh` (Plan 2.5 will add the runtime check; for now, the controller has rebuilt the dev venv with brew python).
 
 **Spec reference:** `/Users/vedantvijay/dev/side_projects/SemanticSearch/docs/superpowers/specs/2026-05-09-semanticsd-design.md`
 **Plan 1 reference:** `/Users/vedantvijay/dev/side_projects/SemanticSearch/docs/superpowers/plans/2026-05-09-foundation.md` (foundation already shipped)
@@ -65,18 +67,24 @@ SemanticSearch/
 
 ## Pre-Task: Bootstrap dependencies (controller-run, before Task 1)
 
-Before dispatching subagents, the controller must update the venv with the new deps. Run from repo root:
+Before dispatching subagents, the controller must:
 
-```bash
-.venv/bin/pip install --upgrade pip
-.venv/bin/pip install \
-    sqlite-vec>=0.1 \
-    pysqlite3-binary>=0.5 \
-    sentence-transformers>=2.7 \
-    torch>=2.2 \
-    openai>=1.30 \
-    tiktoken>=0.7
-```
+1. Verify Python supports sqlite extensions:
+   ```bash
+   .venv/bin/python -c "import sqlite3; sqlite3.connect(':memory:').enable_load_extension(True); print('ok')"
+   ```
+   If this errors with `AttributeError: 'sqlite3.Connection' object has no attribute 'enable_load_extension'`, the venv must be recreated with a Python build that has extensions enabled (e.g., `/opt/homebrew/bin/python3.13`).
+
+2. Install Plan 2 deps:
+   ```bash
+   .venv/bin/pip install --upgrade pip
+   .venv/bin/pip install \
+       sqlite-vec>=0.1 \
+       sentence-transformers>=2.7 \
+       torch>=2.2 \
+       openai>=1.30 \
+       tiktoken>=0.7
+   ```
 
 This is done once per Plan-2 execution to avoid every subagent re-installing.
 
@@ -94,12 +102,13 @@ Append to the existing `requirements.txt`:
 ```
 # Plan 2 additions
 sqlite-vec>=0.1
-pysqlite3-binary>=0.5
 sentence-transformers>=2.7
 torch>=2.2
 openai>=1.30
 tiktoken>=0.7
 ```
+
+(Note: `pysqlite3-binary` is NOT used. We rely on stdlib sqlite3 from a Python build with extension support — see plan tech-stack note above.)
 
 - [ ] **Step 2: Add `dev-sandbox` target to Makefile**
 
@@ -364,26 +373,21 @@ def test_schema_version_is_2(tmp_path):
 ```
 Expected: 3 new tests fail (no `vec_embeddings` table; schema_version still 1).
 
-- [ ] **Step 3: Update `semanticsd/db/connection.py` to use pysqlite3 + load sqlite-vec**
+- [ ] **Step 3: Update `semanticsd/db/connection.py` to load sqlite-vec**
 
 Replace the entire contents of `semanticsd/db/connection.py`:
 
 ```python
-"""SQLite connection factory. Uses pysqlite3 (which bundles a modern SQLite
-with extension loading enabled) and loads the sqlite-vec extension on every
-connection."""
+"""SQLite connection factory. Uses stdlib sqlite3 (Python must be built with
+--enable-loadable-sqlite-extensions; see the plan's tech-stack note) and loads
+the sqlite-vec extension on every connection."""
 from __future__ import annotations
+import sqlite3
 from pathlib import Path
-
-try:
-    import pysqlite3 as sqlite3  # noqa: F401  (re-exported)
-except ImportError:  # pragma: no cover
-    import sqlite3  # type: ignore[no-redef]
-
 import sqlite_vec
 
 
-def get_connection(db_path: Path | str) -> "sqlite3.Connection":
+def get_connection(db_path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -439,7 +443,7 @@ def _current_version(conn) -> int:
     try:
         row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
         return int(row[0]) if row else 0
-    except Exception:  # pysqlite3 raises sqlite3.OperationalError-equivalent
+    except sqlite3.OperationalError:
         return 0
 
 
