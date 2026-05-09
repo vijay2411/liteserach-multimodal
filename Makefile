@@ -31,6 +31,9 @@ uninstall:
 
 dev-sandbox: install
 	SEMANTICSD_HOME=$(PWD)/sandbox/.semanticsd \
-	$(PYTHON) -c "from semanticsd import config, paths; paths.ensure_dirs(); \
-	open(paths.config_path(),'w').write(config.DEFAULT_TOML.replace('directories = []','directories = [\"$(PWD)/sandbox\"]'))" && \
+	$(PYTHON) -c "from semanticsd import config, paths; from semanticsd.db import connection, migrations; \
+	paths.ensure_dirs(); \
+	cfg = config.DEFAULT_TOML.replace('directories = []','directories = [\"$(PWD)/sandbox\"]').replace('http_port = 47600','http_port = 47601'); \
+	open(paths.config_path(),'w').write(cfg); \
+	migrations.apply(connection.get_connection(paths.db_path()))" && \
 	SEMANTICSD_HOME=$(PWD)/sandbox/.semanticsd $(PYTHON) -m semanticsd serve
