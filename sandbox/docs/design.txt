@@ -1,0 +1,6 @@
+SemanticsD design overview.
+
+The daemon watches configured directories for changes. When a file is created or
+modified, an extractor pulls text out of it. The text is chunked, hashed, and
+embedded. Embeddings land in sqlite-vec for nearest-neighbor lookup. Filename
+and full-text searches use SQLite FTS5 tables maintained alongside.
