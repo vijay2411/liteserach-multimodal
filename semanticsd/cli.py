@@ -224,7 +224,51 @@ def ssearch_root(
         return
 
     if query:
-        q = " ".join(query)
+        # Typer's greedy list[str] positional swallows flags placed AFTER the
+        # query (e.g. `ssearch "foo" --all` parses --all into the query). To
+        # keep that ergonomic, re-extract any of our known flag tokens from
+        # the captured list before constructing the actual query string.
+        _BOOL_FLAGS = {
+            "--all": "all_scope",
+            "--semantic": "semantic_flag",
+            "--filename": "filename_flag",
+            "--grep": "grep_flag",
+            "--no-vision": "no_vision",
+            "--json": "json_output",
+        }
+        cleaned: list[str] = []
+        late_overrides: dict[str, bool | str | int] = {}
+        i = 0
+        while i < len(query):
+            tok = query[i]
+            if tok in _BOOL_FLAGS:
+                late_overrides[_BOOL_FLAGS[tok]] = True
+            elif tok in ("--mode", "-n", "--limit") and i + 1 < len(query):
+                key = "mode" if tok == "--mode" else "limit"
+                val = query[i + 1]
+                late_overrides[key] = int(val) if key == "limit" else val
+                i += 1
+            elif tok.startswith("--mode="):
+                late_overrides["mode"] = tok.split("=", 1)[1]
+            elif tok.startswith("--limit="):
+                late_overrides["limit"] = int(tok.split("=", 1)[1])
+            else:
+                cleaned.append(tok)
+            i += 1
+        # Apply overrides
+        if "all_scope" in late_overrides: all_scope = True
+        if "semantic_flag" in late_overrides: semantic = True
+        if "filename_flag" in late_overrides: filename = True
+        if "grep_flag" in late_overrides: grep = True
+        if "no_vision" in late_overrides: no_vision = True
+        if "json_output" in late_overrides: json_output = True
+        if "mode" in late_overrides: mode = late_overrides["mode"]
+        if "limit" in late_overrides: limit = late_overrides["limit"]
+
+        q = " ".join(cleaned)
+        if not q:
+            typer.echo("ERROR: no query after flag extraction", err=True)
+            raise typer.Exit(2)
         if semantic:
             mode = "semantic"
         elif filename:
