@@ -11,6 +11,10 @@ from semanticsd.admin import install as admin_install
 
 semanticsd_app = typer.Typer(no_args_is_help=True, help="SemanticsD daemon admin")
 ssearch_app = typer.Typer(no_args_is_help=True, help="SemanticsD client CLI")
+watch_app = typer.Typer(no_args_is_help=False, help="Inspect / control the FSEvents watcher")
+power_app = typer.Typer(no_args_is_help=False, help="Inspect / switch power mode (active|saver)")
+ssearch_app.add_typer(watch_app, name="watch")
+ssearch_app.add_typer(power_app, name="power")
 
 
 # ---- semanticsd admin ----
@@ -18,10 +22,38 @@ ssearch_app = typer.Typer(no_args_is_help=True, help="SemanticsD client CLI")
 @semanticsd_app.command()
 def serve():
     """Run the daemon (normally invoked by launchd)."""
+    from contextlib import asynccontextmanager
+    from semanticsd.db import connection, migrations
+    from semanticsd.embedders import get_router
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd.pipeline.worker import Worker
+    from semanticsd.server.app import create_app
+    from semanticsd.watcher.power import PowerController
+
     cfg = config.load()
     logging_setup.configure(level=cfg.daemon.log_level, to_file=True)
-    from semanticsd.server.app import create_app
-    app = create_app()
+    paths.ensure_dirs()
+
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+    router = get_router()
+    indexer = Indexer(
+        conn=conn,
+        max_file_size_mb=cfg.watch.max_file_size_mb,
+        ignore_patterns=cfg.watch.ignore_patterns,
+    )
+    worker = Worker(conn=conn, router=router,
+                    batch_size=cfg.embedding.text.batch_size if cfg.embedding.text else 128)
+    power = PowerController(cfg, indexer, worker)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        await power.startup()
+        yield
+        await power.shutdown()
+
+    app = create_app(power_controller=power)
+    app.router.lifespan_context = lifespan
     uvicorn.run(
         app,
         host=cfg.daemon.http_host,
@@ -248,3 +280,104 @@ def ssearch_root(
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: ssearch [QUERY] | --status | --presets | --test-embedder PRESET | --index PATH")
         raise typer.Exit(0)
+
+
+# ---- ssearch watch ----
+
+@watch_app.callback(invoke_without_command=True)
+def watch_status(
+    ctx: typer.Context,
+    sweep: bool = typer.Option(False, "--sweep", help="Force a full re-walk now."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+):
+    """Show watcher status, or trigger a full sweep with --sweep."""
+    if ctx.invoked_subcommand is not None:
+        return
+    try:
+        with _client() as c:
+            if sweep:
+                r = c.post("/v1/watch/sweep", timeout=600.0)
+            else:
+                r = c.get("/v1/watch")
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+        raise typer.Exit(3)
+
+    if json_output:
+        typer.echo(json.dumps(body, indent=2))
+        return
+
+    if sweep:
+        s = body.get("stats", {})
+        typer.echo(f"sweep complete in {s.get('elapsed_s','?')}s — "
+                   f"{s.get('files_indexed', 0)} files indexed, "
+                   f"{s.get('chunks_created', 0)} chunks, "
+                   f"{s.get('jobs_queued', 0)} jobs queued.")
+        return
+
+    typer.echo(f"mode:               {body.get('mode')}")
+    typer.echo(f"watcher_running:    {body.get('watcher_running')}")
+    typer.echo(f"power_source:       {body.get('power_source')}")
+    typer.echo(f"auto_saver:         {body.get('auto_saver_on_battery')}")
+    typer.echo(f"saver_interval_s:   {body.get('saver_interval_s')}")
+    typer.echo(f"dirty_pending:      {body.get('dirty_pending')}")
+    typer.echo(f"last_sweep_at:      {body.get('last_sweep_at')}")
+    dirs = body.get("directories", []) or []
+    if dirs:
+        typer.echo("directories:")
+        for d in dirs:
+            typer.echo(f"  {d}")
+    else:
+        typer.echo("directories:        (none configured — add to [watch].directories)")
+
+
+# ---- ssearch power ----
+
+@power_app.callback(invoke_without_command=True)
+def power_status(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+):
+    """Show current power mode."""
+    if ctx.invoked_subcommand is not None:
+        return
+    try:
+        with _client() as c:
+            r = c.get("/v1/power")
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+        raise typer.Exit(3)
+    if json_output:
+        typer.echo(json.dumps(body, indent=2))
+        return
+    typer.echo(f"mode:                  {body.get('mode')}")
+    typer.echo(f"power_source:          {body.get('power_source')}")
+    typer.echo(f"auto_saver_on_battery: {body.get('auto_saver_on_battery')}")
+
+
+@power_app.command("active")
+def power_active():
+    """Switch to active mode (FSEvents watcher running)."""
+    _power_set("active")
+
+
+@power_app.command("saver")
+def power_saver():
+    """Switch to saver mode (watcher off, periodic sweep)."""
+    _power_set("saver")
+
+
+def _power_set(mode: str) -> None:
+    try:
+        with _client() as c:
+            r = c.post("/v1/power", json={"mode": mode})
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+        raise typer.Exit(3)
+    typer.echo(f"power mode -> {body.get('mode')}")

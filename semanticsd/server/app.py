@@ -3,15 +3,26 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from semanticsd import __version__
-from semanticsd.server.routes import health, presets, embedder_test, index as index_route, search as search_route
+from semanticsd.server.routes import (
+    health, presets, embedder_test,
+    index as index_route, search as search_route,
+    watch as watch_route, power as power_route,
+)
 
 
-def create_app() -> FastAPI:
+def create_app(power_controller=None) -> FastAPI:
+    """Build the FastAPI app.
+
+    `power_controller` is the runtime PowerController instance. The /v1/watch
+    and /v1/power endpoints reach into it via app.state. When None (e.g.
+    tests not exercising the watcher), those endpoints respond with 503.
+    """
     app = FastAPI(
         title="SemanticsD",
         version=__version__,
         description="Local semantic search daemon for macOS.",
     )
+    app.state.power_controller = power_controller
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
@@ -24,4 +35,6 @@ def create_app() -> FastAPI:
     app.include_router(embedder_test.router, prefix="/v1")
     app.include_router(index_route.router, prefix="/v1")
     app.include_router(search_route.router, prefix="/v1")
+    app.include_router(watch_route.router, prefix="/v1")
+    app.include_router(power_route.router, prefix="/v1")
     return app
