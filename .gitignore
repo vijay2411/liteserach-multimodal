@@ -17,3 +17,5 @@ htmlcov/
 .env.local
 node_modules/
 sandbox/.semanticsd/
+sandbox-docs/
+sandbox-docs-local/
