@@ -9,3 +9,4 @@ from semanticsd.extractors import epub  # noqa: F401
 from semanticsd.extractors import rtf  # noqa: F401
 from semanticsd.extractors import email_msg  # noqa: F401
 from semanticsd.extractors import notebook  # noqa: F401
+from semanticsd.extractors import image  # noqa: F401
