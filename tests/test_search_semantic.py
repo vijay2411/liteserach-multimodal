@@ -34,15 +34,15 @@ def test_semantic_text_returns_nearest(tmp_path):
     conn = connection.get_connection(db)
     migrations.apply(conn)
 
-    # Three chunks; nearest to query [1,0,...] is chunk 1 (also [1,0,...]).
-    base = [0.0] * 768
-    v_close = [1.0] + [0.0] * 767
-    v_far = [-1.0] + [0.0] * 767
-    v_other = [0.0, 1.0] + [0.0] * 766
+    # Use vectors that all sit above the MIN_TEXT_COSINE (0.30) threshold
+    # vs the query, so we can verify ranking without the threshold dropping rows.
+    v_close   = [1.0] + [0.0] * 767                                # cos = 1.0
+    v_near    = [0.9, 0.43589] + [0.0] * 766                        # cos ≈ 0.90
+    v_decent  = [0.6, 0.8] + [0.0] * 766                            # cos ≈ 0.60
 
     _seed_text_chunk(conn, 1, 1, "/x/a.md", "alpha contents about foxes", v_close)
-    _seed_text_chunk(conn, 2, 2, "/x/b.md", "beta contents about cats and dogs", v_far)
-    _seed_text_chunk(conn, 3, 3, "/x/c.md", "gamma contents about lazy mornings", v_other)
+    _seed_text_chunk(conn, 2, 2, "/x/b.md", "beta contents about cats and dogs", v_near)
+    _seed_text_chunk(conn, 3, 3, "/x/c.md", "gamma contents about lazy mornings", v_decent)
 
     results = search_semantic_text(conn, query_vec=v_close, limit=3)
     assert len(results) == 3
@@ -116,19 +116,34 @@ def test_semantic_drops_short_chunks(tmp_path):
 
 
 def test_semantic_score_is_cosine_in_zero_to_one(tmp_path):
-    """For unit-normalized vectors, score should be in [0, 1] not the
-    legacy 1 - L2 (which can go negative)."""
+    """For unit-normalized vectors, the per-mode score is true cosine similarity."""
     db = tmp_path / "s.db"
     conn = connection.get_connection(db)
     migrations.apply(conn)
-    v_a = [1.0] + [0.0] * 767
-    v_b = [0.0, 1.0] + [0.0] * 766
+    v_a = [1.0] + [0.0] * 767                  # query / first doc
+    v_b = [0.7, 0.71414] + [0.0] * 766         # cos ≈ 0.70 — above threshold
     _seed_text_chunk(conn, 1, 1, "/x/a.md", "first document about quantum mechanics", v_a)
     _seed_text_chunk(conn, 2, 2, "/x/b.md", "second document about classical music", v_b)
 
     results = search_semantic_text(conn, query_vec=v_a, limit=5)
     assert len(results) == 2
-    # Top result is identical -> cos_sim = 1.0
+    # Identical vectors → cos = 1.0
     assert results[0].score > 0.99
-    # Second is orthogonal -> cos_sim ≈ 0.0
-    assert -0.01 < results[1].score < 0.01
+    # Cos ≈ 0.7 (well above the 0.30 threshold)
+    assert 0.6 < results[1].score < 0.8
+
+
+def test_semantic_drops_low_cosine_results(tmp_path):
+    """Results below MIN_TEXT_COSINE are dropped before returning."""
+    db = tmp_path / "s.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+    v_a = [1.0] + [0.0] * 767                  # query
+    v_orthogonal = [0.0, 1.0] + [0.0] * 766    # cos = 0.0, well below threshold
+    _seed_text_chunk(conn, 1, 1, "/x/a.md", "first document about quantum mechanics", v_a)
+    _seed_text_chunk(conn, 2, 2, "/x/b.md", "second document about classical music", v_orthogonal)
+
+    results = search_semantic_text(conn, query_vec=v_a, limit=5)
+    paths = [r.path for r in results]
+    assert "/x/a.md" in paths
+    assert "/x/b.md" not in paths  # filtered by MIN_TEXT_COSINE

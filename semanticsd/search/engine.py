@@ -92,8 +92,20 @@ class Engine:
             results = rank_lists[0]
 
         results = self._cwd_filter(results, opts)[: opts.limit]
+        results = self._normalize_scores(results)
         results = self._enrich_snippets(results, query)
         return results
+
+    def _normalize_scores(self, results: list[SearchResult]) -> list[SearchResult]:
+        """Max-normalize so the top result is 1.0. Keeps relative ranking,
+        makes the displayed numbers intuitive (RRF scores are inherently
+        compressed to ~[0, 0.04])."""
+        if not results:
+            return results
+        peak = max(r.score for r in results)
+        if peak <= 0.0:
+            return results
+        return [r.model_copy(update={"score": r.score / peak}) for r in results]
 
     def _semantic_text(self, query: str, limit: int) -> list[SearchResult]:
         text_em = self.router.text

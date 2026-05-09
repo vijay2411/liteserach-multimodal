@@ -12,6 +12,12 @@ log = logging.getLogger(__name__)
 # their near-zero vectors are close to almost any query.
 MIN_TEXT_LEN = 20
 
+# Minimum cosine similarity to keep a result. Cross-modal text→vision
+# alignment is fuzzier than same-modality, so we hold it to a higher bar
+# to avoid every random image surfacing for every text query.
+MIN_TEXT_COSINE = 0.30
+MIN_VISION_COSINE = 0.45
+
 
 def _vec_to_blob(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
@@ -72,21 +78,26 @@ def search_semantic_text(
         """,
         (blob, limit * 2, MIN_TEXT_LEN),
     ).fetchall()
-    return [
-        SearchResult(
+    out: list[SearchResult] = []
+    for row in rows:
+        score = _l2_to_cosine(float(row[1]))
+        if score < MIN_TEXT_COSINE:
+            continue
+        out.append(SearchResult(
             path=str(row[7]),
             modality="text",
             mode="semantic",
-            score=_l2_to_cosine(float(row[1])),
+            score=score,
             chunk_id=int(row[0]),
             file_id=int(row[2]),
             snippet=str(row[3]),
             byte_start=int(row[4]),
             byte_end=int(row[5]),
             metadata={"file_type": row[8]},
-        )
-        for row in rows[:limit]
-    ]
+        ))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def search_semantic_vision(
@@ -126,11 +137,14 @@ def search_semantic_vision(
             log.warning("vision search on %s failed: %s", table, e)
             continue
         for row in rows:
+            score = _l2_to_cosine(float(row[1]))
+            if score < MIN_VISION_COSINE:
+                continue
             out.append(SearchResult(
                 path=str(row[6]),
                 modality="vision",
                 mode="semantic",
-                score=_l2_to_cosine(float(row[1])),
+                score=score,
                 chunk_id=int(row[0]),
                 file_id=int(row[2]),
                 snippet=str(row[3]),
