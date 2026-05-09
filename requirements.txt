@@ -20,6 +20,10 @@ tiktoken>=0.7
 # Plan 3 additions
 pypdf>=4.0
 pypdfium2>=4.30
+
+# Plan 6 (FSEvents watcher + power)
+watchdog>=4.0
+psutil>=5.9
 reportlab>=4.0
 python-docx>=1.1
 openpyxl>=3.1
