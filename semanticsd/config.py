@@ -17,13 +17,32 @@ class WatchConfig(BaseModel):
     max_file_size_mb: int = 50
 
 
-class EmbeddingConfig(BaseModel):
-    backend: str = "local"
+class TextEmbeddingConfig(BaseModel):
     preset: str = "local"
     model: str = "BAAI/bge-small-en-v1.5"
     base_url: str = ""
     dimensions: int = 0
     batch_size: int = 128
+
+
+class VisionEmbeddingConfig(BaseModel):
+    preset: str = ""
+    model: str = ""
+    base_url: str = ""
+    dimensions: int = 0
+    batch_size: int = 16
+
+
+class EmbeddingConfig(BaseModel):
+    text: TextEmbeddingConfig = Field(default_factory=TextEmbeddingConfig)
+    vision: VisionEmbeddingConfig | None = None
+    # Legacy passthrough fields (not used; tolerated for older configs)
+    backend: str | None = None
+    preset: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    dimensions: int | None = None
+    batch_size: int | None = None
 
 
 class SearchConfig(BaseModel):
@@ -73,11 +92,22 @@ class Config(BaseModel):
 
 
 def load(path: Path | None = None) -> Config:
-    """Load config, falling back to defaults if file missing or section absent."""
+    """Load config, falling back to defaults if file missing or section absent.
+
+    Migrates legacy flat [embedding] sections to [embedding.text] in memory.
+    """
     p = path or paths.config_path()
     if not p.exists():
         return Config()
     raw = tomllib.loads(p.read_text())
+    emb = raw.get("embedding", {})
+    if emb and "text" not in emb and "vision" not in emb and (
+        "preset" in emb or "model" in emb or "backend" in emb
+    ):
+        text_keys = ("preset", "model", "base_url", "dimensions", "batch_size")
+        raw["embedding"] = {
+            "text": {k: v for k, v in emb.items() if k in text_keys},
+        }
     try:
         return Config(**raw)
     except ValidationError as e:
@@ -87,14 +117,19 @@ def load(path: Path | None = None) -> Config:
 DEFAULT_TOML = """\
 [watch]
 directories = []
-ignore_patterns = [".git", "node_modules", ".DS_Store", "target", "build", "*.o"]
+ignore_patterns = [".git", "node_modules", ".DS_Store", "target", "build", "*.o", ".semanticsd"]
 max_file_size_mb = 50
 
-[embedding]
-backend = "local"
-preset = "local"
-model = "BAAI/bge-small-en-v1.5"
+[embedding.text]
+preset = "ollama"
+model = "embeddinggemma"
+base_url = "http://localhost:11434/v1"
 batch_size = 128
+
+# [embedding.vision]
+# preset = "gemini"
+# model = "gemini-embedding-2"
+# batch_size = 8
 
 [search]
 default_mode = "semantic"
