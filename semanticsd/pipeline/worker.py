@@ -8,6 +8,8 @@ import time
 from collections import defaultdict
 from semanticsd.embedders.router import EmbedderRouter
 from semanticsd.pipeline.hasher import find_existing_embedding
+from semanticsd.usage.recorder import UsageEvent, record_usage, compute_cost
+from semanticsd.usage.budget import BudgetGate
 
 log = logging.getLogger(__name__)
 
@@ -42,11 +44,15 @@ class Worker:
         router: EmbedderRouter,
         batch_size: int = 128,
         max_attempts: int = 5,
+        budget_gate: BudgetGate | None = None,
     ):
         self.conn = conn
         self.router = router
         self.batch_size = batch_size
         self.max_attempts = max_attempts
+        # When None, no budget enforcement (test/legacy path). The daemon
+        # passes a real gate built from cfg.budget.
+        self.budget_gate = budget_gate
 
     def reset_stale(self) -> None:
         self.conn.execute("UPDATE jobs SET status='pending' WHERE status='in_flight'")
@@ -113,12 +119,47 @@ class Worker:
                 to_embed.append((int(jid), int(cid), text, chash, blob))
 
         if to_embed:
+            # Estimate this batch's cost up-front for the budget gate.
+            rate = float(getattr(embedder, "cost_per_million_input_tokens_usd",
+                                 getattr(embedder, "cost_per_million_image_tokens_usd", 0.0)))
+            if self.budget_gate is not None and rate > 0.0:
+                # Use the embedder's token estimator so we don't double-count.
+                if modality == "text":
+                    est_tokens = embedder.estimate_tokens([t[2] for t in to_embed])
+                else:
+                    est_tokens = embedder.estimate_image_tokens([t[4] for t in to_embed])
+                est_cost = compute_cost(int(est_tokens), rate)
+                if not self.budget_gate.can_spend(est_cost):
+                    job_ids = [int(t[0]) for t in to_embed]
+                    log.warning(
+                        "budget exceeded — refusing %d %s jobs (est $%.4f)",
+                        len(job_ids), modality, est_cost,
+                    )
+                    self._mark_failed(job_ids, "budget_exceeded")
+                    return 0
+            t0 = time.monotonic()
             if modality == "text":
                 inputs = [t[2] for t in to_embed]
                 result = embedder.embed(inputs, kind="doc")
             else:  # vision
                 inputs = [t[4] for t in to_embed]
                 result = embedder.embed_images(inputs, kind="doc")
+            duration_ms = int((time.monotonic() - t0) * 1000)
+
+            actual_cost = compute_cost(int(result.input_tokens), rate)
+            try:
+                record_usage(self.conn, UsageEvent(
+                    provider_id=embedder.provider_id,
+                    model_id=embedder.model_id,
+                    operation=f"{modality}_embed",
+                    input_tokens=int(result.input_tokens),
+                    chunk_count=len(to_embed),
+                    duration_ms=duration_ms,
+                    cost_usd=actual_cost,
+                ))
+            except Exception as e:
+                log.warning("failed to record usage row: %s", e)
+
             for (jid, cid, _t, chash, _b), vec in zip(to_embed, result.vectors):
                 self.conn.execute(
                     f"INSERT OR REPLACE INTO {vec_table}(rowid, embedding) VALUES (?, ?)",

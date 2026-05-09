@@ -184,3 +184,95 @@ def test_worker_skips_modality_with_no_embedder(tmp_path):
 
     err = conn.execute("SELECT last_error FROM jobs").fetchone()[0]
     assert err and "no_embedder_for_modality" in err
+
+
+# --- usage recording + budget gate ---
+
+class _PaidText(Embedder):
+    """A deterministic 'paid' embedder that costs $1/M input tokens."""
+    provider_id = "paid"; model_id = "p1"; dim = 768
+    supports_kind = False
+    cost_per_million_input_tokens_usd = 1.0  # $1 per million tokens
+
+    def embed(self, texts, kind):
+        # Pretend each text is 1M tokens — so each call costs $1.
+        return EmbedResult(
+            vectors=[[0.5] * 768 for _ in texts],
+            input_tokens=1_000_000 * len(texts),
+        )
+
+    def health_check(self): return (True, "ok")
+    def estimate_tokens(self, texts): return 1_000_000 * len(texts)
+
+
+def test_worker_writes_usage_row(tmp_path):
+    """A successful embed batch should insert exactly one row into usage."""
+    conn = _index_one(tmp_path)
+    text_em = _PaidText()
+    router = EmbedderRouter(text=text_em)
+    w = Worker(conn=conn, router=router, batch_size=10)
+    w.drain_once()
+
+    rows = conn.execute(
+        "SELECT provider_id, model_id, operation, cost_usd, chunk_count "
+        "FROM usage"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "paid"
+    assert rows[0][2] == "text_embed"
+    assert rows[0][3] > 0.0  # paid provider should record positive cost
+    assert rows[0][4] >= 1
+
+
+def test_worker_respects_budget_gate(tmp_path):
+    """When the gate refuses a batch, jobs should fail with budget_exceeded."""
+    from semanticsd.usage.budget import BudgetGate
+
+    conn = _index_one(tmp_path)
+    # Pre-charge the month's usage to $4.00, with a $5 cap. Next call would
+    # add another $1+ and push us over.
+    import time as _t
+    conn.execute(
+        "INSERT INTO usage(timestamp, provider_id, model_id, operation, "
+        "input_tokens, cost_usd, chunk_count, duration_ms) "
+        "VALUES (?, 'paid', 'p1', 'text_embed', 1, 4.5, 1, 100)",
+        (int(_t.time()),),
+    )
+
+    gate = BudgetGate(conn, monthly_limit_usd=5.0)
+    text_em = _PaidText()
+    router = EmbedderRouter(text=text_em)
+    w = Worker(conn=conn, router=router, batch_size=10, budget_gate=gate)
+    w.drain_once()
+
+    failed = conn.execute(
+        "SELECT last_error FROM jobs WHERE status='failed'"
+    ).fetchone()
+    pending = conn.execute(
+        "SELECT last_error FROM jobs WHERE status='pending'"
+    ).fetchone()
+    # The job either landed in failed (max_attempts=1) or was bumped back to
+    # pending with the budget_exceeded error message.
+    err = (failed and failed[0]) or (pending and pending[0])
+    assert err and "budget_exceeded" in err
+
+
+def test_worker_local_provider_bypasses_budget(tmp_path):
+    """Free providers (rate=0) must not be blocked by the gate."""
+    from semanticsd.usage.budget import BudgetGate
+
+    conn = _index_one(tmp_path)
+    # Already over cap.
+    import time as _t
+    conn.execute(
+        "INSERT INTO usage(timestamp, provider_id, model_id, operation, "
+        "input_tokens, cost_usd, chunk_count, duration_ms) "
+        "VALUES (?, 'paid', 'p1', 'text_embed', 1, 100.0, 1, 100)",
+        (int(_t.time()),),
+    )
+    gate = BudgetGate(conn, monthly_limit_usd=5.0)
+    # FakeTextEmbedder has cost_per_million=0 (free)
+    router = EmbedderRouter(text=FakeTextEmbedder())
+    w = Worker(conn=conn, router=router, batch_size=10, budget_gate=gate)
+    n = w.drain_once()
+    assert n >= 1  # processed despite over-cap
