@@ -52,8 +52,11 @@ def serve():
         yield
         await power.shutdown()
 
-    app = create_app(power_controller=power)
-    app.router.lifespan_context = lifespan
+    # IMPORTANT: pass lifespan at construction. Assigning to
+    # app.router.lifespan_context afterwards runs the body but doesn't drive
+    # the ASGI lifespan protocol — uvicorn never sees "startup complete" and
+    # never binds the port.
+    app = create_app(power_controller=power, lifespan=lifespan)
     uvicorn.run(
         app,
         host=cfg.daemon.http_host,
@@ -166,11 +169,20 @@ def logs(
 def doctor():
     """Run preflight checks: Python build, sqlite-vec, Ollama, optional vendors."""
     import importlib, socket as _s
-    fails = 0
-    def chk(label, ok, detail=""):
-        nonlocal fails
-        mark = "✓" if ok else "✗"
-        if not ok: fails += 1
+    required_fails: list[str] = []
+    optional_warnings: list[str] = []
+    next_steps: list[str] = []
+
+    def chk(label, ok, detail="", *, optional=False):
+        # ✓ green; ⚠ amber for optional misses; ✗ red for required misses.
+        if ok:
+            mark = "✓"
+        elif optional:
+            mark = "⚠"
+            optional_warnings.append(label)
+        else:
+            mark = "✗"
+            required_fails.append(label)
         line = f"  {mark} {label}"
         if detail: line += f"  ({detail})"
         typer.echo(line)
@@ -205,26 +217,47 @@ def doctor():
         ollama_up = False
     finally:
         sock.close()
-    chk("Ollama at localhost:11434", ollama_up, "optional, for local text embeddings")
+    chk("Ollama at localhost:11434", ollama_up,
+        "optional, for local text embeddings", optional=True)
 
     typer.echo("\nKeychain")
     tok = keychain.get_auth_token()
-    chk("auth token present", bool(tok), "run `semanticsd install`" if not tok else "")
+    chk("auth token present", bool(tok),
+        "run `semanticsd install`" if not tok else "")
+    if not tok:
+        next_steps.append("semanticsd install")
     for prov in ["openai", "gemini"]:
         v = keychain.get_provider_key(prov)
         chk(f"provider key: {prov}", v is not None,
-            "" if v else "optional, only if you use this provider")
+            "" if v else "optional, only if you use this provider",
+            optional=True)
 
     typer.echo("\nDaemon")
     s = admin_install.daemon_status()
     chk("launchd agent loaded", s["loaded"])
-    chk("daemon running", bool(s.get("running")), f"pid {s.get('pid')}" if s.get("running") else "")
+    if not s["loaded"]:
+        next_steps.append("semanticsd install")
+    daemon_running = bool(s.get("running"))
+    chk("daemon running", daemon_running,
+        f"pid {s.get('pid')}" if daemon_running else "loaded but not running")
+    if s["loaded"] and not daemon_running:
+        next_steps.append("semanticsd start  # or `semanticsd logs` to see why it crashed")
 
     typer.echo("")
-    if fails:
-        typer.echo(f"{fails} check(s) failed")
+    if required_fails:
+        typer.echo(f"❌ {len(required_fails)} required check(s) failed:")
+        for label in required_fails:
+            typer.echo(f"   - {label}")
+        if next_steps:
+            typer.echo("\n  Next steps:")
+            for step in next_steps:
+                typer.echo(f"   $ {step}")
         raise typer.Exit(1)
-    typer.echo("all checks passed")
+    if optional_warnings:
+        typer.echo(f"✓ all required checks passed  "
+                   f"({len(optional_warnings)} optional check(s) skipped)")
+    else:
+        typer.echo("✓ all checks passed")
 
 
 # ---- ssearch client ----

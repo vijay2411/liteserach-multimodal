@@ -99,22 +99,38 @@ class PowerController:
     # ------------------------------------------------------------------ lifecycle
 
     async def startup(self) -> None:
-        """Run initial sweep + start whichever mode applies + worker drain loop."""
-        await self._initial_sweep()
-        # Always run the worker drain loop in background so embed jobs flow.
+        """Bring the daemon up fast: HTTP server first, then everything else.
+
+        The initial sweep can take MINUTES on a large corpus (Whisper
+        transcription dominates audio extraction). Awaiting it here would
+        block the FastAPI lifespan, which means uvicorn doesn't accept
+        requests — `/v1/health` would hang during the entire sweep.
+
+        Instead, schedule the sweep as a background task and return
+        immediately. The watcher comes up in parallel; the user can hit
+        the API right away and see `last_sweep_at` flip when the initial
+        scan completes.
+        """
+        # Worker drain loop, mode entry (which starts the watcher), and the
+        # optional battery poll all start now — no awaits that could block.
+        # CRITICAL: every long-running sync work (worker.drain_once,
+        # indexer.index_path) is dispatched to a thread executor so it
+        # doesn't block the event loop and stall the FastAPI lifespan yield.
         self._worker_task = asyncio.create_task(self._worker_loop(), name="worker-drain")
-        # Apply battery preference before activating the chosen mode, so a
-        # daemon launched on battery starts in saver if configured.
         target = self._mode_for_battery_state(self._configured_mode)
         await self._enter_mode(target, reason="startup")
-        # Start the battery poll only if auto_saver_on_battery is enabled.
         if self.cfg.power.auto_saver_on_battery:
             self._battery_task = asyncio.create_task(self._battery_loop(), name="battery-poll")
+        # Initial sweep runs in the background — see docstring above.
+        self._initial_sweep_task = asyncio.create_task(
+            self._initial_sweep(), name="initial-sweep"
+        )
 
     async def shutdown(self) -> None:
         self._stopping = True
         self.watcher.stop()
-        for t in (self._drain_task, self._saver_task, self._battery_task, self._worker_task):
+        for t in (self._drain_task, self._saver_task, self._battery_task,
+                  self._worker_task, getattr(self, "_initial_sweep_task", None)):
             if t is not None:
                 t.cancel()
         # Final flush of pending dirty entries — best-effort, may be partial.
@@ -224,12 +240,20 @@ class PowerController:
             return
 
     async def _worker_loop(self) -> None:
-        """Drain the embed-job queue forever."""
+        """Drain the embed-job queue forever.
+
+        worker.drain_once() is sync and makes blocking HTTP calls to Ollama
+        / Gemini. We MUST run it in a thread executor — otherwise it blocks
+        the asyncio event loop, which means the FastAPI lifespan yield
+        never reaches uvicorn, the port is never bound, and the daemon
+        appears completely unresponsive.
+        """
+        loop = asyncio.get_running_loop()
         try:
-            self.worker.reset_stale()
+            await loop.run_in_executor(None, self.worker.reset_stale)
             while not self._stopping:
                 try:
-                    n = self.worker.drain_once()
+                    n = await loop.run_in_executor(None, self.worker.drain_once)
                 except Exception as e:
                     log.error("worker drain crashed: %s", e)
                     n = 0

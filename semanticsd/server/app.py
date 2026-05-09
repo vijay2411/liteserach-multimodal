@@ -18,18 +18,27 @@ from semanticsd.server.routes import (
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(power_controller=None) -> FastAPI:
+def create_app(power_controller=None, lifespan=None) -> FastAPI:
     """Build the FastAPI app.
 
     `power_controller` is the runtime PowerController instance. The /v1/watch
     and /v1/power endpoints reach into it via app.state. When None (e.g.
     tests not exercising the watcher), those endpoints respond with 503.
+
+    `lifespan` is an optional asynccontextmanager(app) for daemon-mode startup
+    /shutdown. Must be passed at construction — Starlette only wires lifespan
+    into the ASGI protocol when the FastAPI() call sees it; assigning to
+    `app.router.lifespan_context` after the fact runs the body but doesn't
+    signal startup-complete to uvicorn, so the port never binds.
     """
-    app = FastAPI(
+    app_kwargs = dict(
         title="SemanticsD",
         version=__version__,
         description="Local semantic search daemon for macOS.",
     )
+    if lifespan is not None:
+        app_kwargs["lifespan"] = lifespan
+    app = FastAPI(**app_kwargs)
     app.state.power_controller = power_controller
     app.add_middleware(
         CORSMiddleware,

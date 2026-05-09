@@ -158,6 +158,10 @@ async def test_saver_mode_does_not_react_to_changes_immediately(tmp_path):
 
     try:
         await pc.startup()
+        # Initial sweep is now a background task; wait for it before testing
+        # post-startup file-add behavior to avoid a race.
+        if getattr(pc, "_initial_sweep_task", None) is not None:
+            await pc._initial_sweep_task
         assert pc.mode == "saver"
         assert pc.watcher.is_running is False
 

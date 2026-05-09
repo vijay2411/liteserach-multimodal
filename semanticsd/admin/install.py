@@ -31,10 +31,14 @@ def install() -> dict:
     launchd.write_plist(plist_path, python_executable=sys.executable, package_dir=package_dir)
     actions.append(f"plist at {plist_path}")
 
-    # Bootstrap into the user's launchd domain. Bootout first to make idempotent.
+    # Bootstrap into the user's launchd domain. Bootout BY LABEL first to
+    # take down whatever's currently loaded under com.semanticsd — including
+    # plists from previous installs at different paths (e.g. sandbox dirs).
+    # Path-based bootout misses those, leaving the old daemon loaded and
+    # making the new bootstrap a silent no-op.
     uid = os.getuid()
     subprocess.run(
-        ["launchctl", "bootout", f"gui/{uid}", str(plist_path)],
+        ["launchctl", "bootout", f"gui/{uid}/com.semanticsd"],
         check=False, capture_output=True,
     )
     result = subprocess.run(
@@ -54,11 +58,12 @@ def uninstall() -> dict:
     actions = []
     plist_path = paths.launch_agent_plist()
     uid = os.getuid()
+    # Bootout by label so we cover stale plists at non-default paths too.
     subprocess.run(
-        ["launchctl", "bootout", f"gui/{uid}", str(plist_path)],
+        ["launchctl", "bootout", f"gui/{uid}/com.semanticsd"],
         check=False, capture_output=True,
     )
-    actions.append("launchctl bootout")
+    actions.append("launchctl bootout (by label)")
     if plist_path.exists():
         plist_path.unlink()
         actions.append(f"removed {plist_path}")
@@ -82,13 +87,18 @@ def _gui_target() -> str:
 
 
 def start() -> dict:
-    """Start (or re-start) the daemon via launchctl. Idempotent."""
+    """Start (or re-start) the daemon via launchctl. Idempotent.
+
+    Bootout-by-label first so stale plists at non-default paths are
+    taken down before we bootstrap the current one.
+    """
     plist = paths.launch_agent_plist()
     if not plist.exists():
         raise RuntimeError("plist not installed — run `semanticsd install` first")
-    # bootout then bootstrap = clean restart; ignore bootout failures (might not be loaded)
-    subprocess.run(["launchctl", "bootout", _gui_target(), str(plist)],
-                   check=False, capture_output=True)
+    subprocess.run(
+        ["launchctl", "bootout", f"{_gui_target()}/{_label()}"],
+        check=False, capture_output=True,
+    )
     r = subprocess.run(
         ["launchctl", "bootstrap", _gui_target(), str(plist)],
         check=False, capture_output=True, text=True,
@@ -97,10 +107,9 @@ def start() -> dict:
 
 
 def stop() -> dict:
-    """Stop the daemon via launchctl bootout. Idempotent."""
-    plist = paths.launch_agent_plist()
+    """Stop the daemon via launchctl bootout (by label). Idempotent."""
     r = subprocess.run(
-        ["launchctl", "bootout", _gui_target(), str(plist)],
+        ["launchctl", "bootout", f"{_gui_target()}/{_label()}"],
         check=False, capture_output=True, text=True,
     )
     return {"ok": r.returncode == 0, "stderr": r.stderr.strip()}
@@ -131,18 +140,25 @@ def daemon_status() -> dict:
         return {"loaded": False, "running": False, "pid": None,
                 "raw": r.stderr.strip() or "agent not loaded"}
     out = r.stdout
-    # `launchctl print` reports `state = running` or `state = not running`
+    # `launchctl print` is verbose and contains multiple `state = ...` lines —
+    # one top-level for the agent itself, and several inside sub-blocks
+    # (spawn-type config, etc.). We only want the top-level one, which is
+    # indented with exactly one tab. Same for `pid = ...`.
     pid = None
     running = False
     for line in out.splitlines():
+        # Top-level fields look like "\tkey = value" (single leading tab).
+        if not line.startswith("\t") or line.startswith("\t\t"):
+            continue
         s = line.strip()
         if s.startswith("pid ="):
             try:
                 pid = int(s.split("=", 1)[1].strip())
             except ValueError:
                 pass
-        if s.startswith("state ="):
-            running = s.endswith("running") and "not running" not in s
+        elif s.startswith("state ="):
+            val = s.split("=", 1)[1].strip()
+            running = val == "running"
     return {"loaded": True, "running": running, "pid": pid, "raw": out[:500]}
 
 
