@@ -1,6 +1,7 @@
 """Filename FTS — search file paths via fts_paths."""
 from __future__ import annotations
 import sqlite3
+from semanticsd.search.grep import _build_fts_query
 from semanticsd.search.types import SearchResult
 
 
@@ -12,19 +13,26 @@ def search_filename(
     """Return file-level matches by FTS over the path column.
 
     BM25 rank ascending == better match in FTS5; we invert via -rank so
-    score is "higher = better".
+    score is "higher = better". Queries are OR-rewritten so multi-word
+    queries match files containing any of the tokens.
     """
-    rows = conn.execute(
-        """
-        SELECT f.id, f.path, f.file_type, fts_paths.rank
-        FROM fts_paths
-        JOIN files f ON f.id = fts_paths.rowid
-        WHERE fts_paths MATCH ?
-        ORDER BY fts_paths.rank
-        LIMIT ?
-        """,
-        (query, limit),
-    ).fetchall()
+    fts_query = _build_fts_query(query)
+    if not fts_query:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT f.id, f.path, f.file_type, fts_paths.rank
+            FROM fts_paths
+            JOIN files f ON f.id = fts_paths.rowid
+            WHERE fts_paths MATCH ?
+            ORDER BY fts_paths.rank
+            LIMIT ?
+            """,
+            (fts_query, limit),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
     return [
         SearchResult(
             path=str(row[1]),

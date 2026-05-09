@@ -5,13 +5,35 @@ import pathspec
 
 
 DEFAULT_PATTERNS = [
+    # Version control / OS metadata
     ".git/", ".svn/", ".hg/",
+    ".DS_Store", "Thumbs.db",
+    # Editor leftovers
+    "*.swp", "*.swo", "*~",
+    # Generic build / dependency / cache directories
     "node_modules/", "__pycache__/", "*.pyc",
     "build/", "dist/", "target/",
-    ".venv/", "venv/",
-    ".DS_Store", "*.swp", "*.swo",
-    ".pytest_cache/", ".mypy_cache/", ".ruff_cache/",
-    "*.o", "*.so", "*.dylib", "*.dll",
+    ".venv/", "venv/", "env/", ".env/",
+    ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", ".tox/",
+    ".turbo/", ".next/", ".nuxt/", ".cache/", ".parcel-cache/",
+    "coverage/", ".coverage", ".semanticsd/",
+    # Compiled / binary
+    "*.o", "*.obj", "*.so", "*.dylib", "*.dll", "*.exe",
+    "*.class",
+    # Minified / bundled JS+CSS — these are giant tokens-per-byte and pollute
+    # FTS with random identifier matches. Source maps are pure noise too.
+    "*.min.js", "*.min.css",
+    "*.bundle.js", "*.bundle.css",
+    "*.map",
+    "**/_astro/**",
+    "**/.astro/**",
+    # Vendor + plugin code that ships as bundled JS — index-bypass reduces noise
+    "**/.obsidian/plugins/**",
+    "**/.playwright-cli/**",
+    "**/.husky/**",
+    # Lock files (machine-generated, low search value)
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "poetry.lock", "Cargo.lock", "uv.lock",
 ]
 
 

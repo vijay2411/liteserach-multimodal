@@ -8,15 +8,18 @@ from semanticsd.search.types import SearchResult
 log = logging.getLogger(__name__)
 
 # Chunks shorter than this (after stripping) aren't worth ranking — empty
-# JSON files, single-line dotfiles, etc. dominate semantic results because
-# their near-zero vectors are close to almost any query.
-MIN_TEXT_LEN = 20
+# JSON files (`{}`), pure-whitespace files, and one-character notes
+# dominate semantic results because their near-zero vectors are close to
+# almost any query. 3 is enough to drop those while keeping legit short
+# content like single-word markers or terse identifiers.
+MIN_TEXT_LEN = 3
 
 # Minimum cosine similarity to keep a result. Cross-modal text→vision
-# alignment is fuzzier than same-modality, so we hold it to a higher bar
-# to avoid every random image surfacing for every text query.
-MIN_TEXT_COSINE = 0.30
-MIN_VISION_COSINE = 0.45
+# alignment is fuzzier than same-modality. Tuned against the stress
+# corpus: 0.40 keeps clear cross-modal hits (cat-image for cat-query at
+# cos=0.42) while still excluding random images that sit at cos~0.20.
+MIN_TEXT_COSINE = 0.50
+MIN_VISION_COSINE = 0.40
 
 
 def _vec_to_blob(vec: list[float]) -> bytes:

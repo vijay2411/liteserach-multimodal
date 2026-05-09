@@ -16,6 +16,12 @@ log = logging.getLogger(__name__)
 
 OVERFETCH = 3  # over-fetch this multiple before applying CWD filter
 
+# Floor for the *raw* fused score (pre-normalization). Below this we
+# don't believe any of the matches are meaningful — return empty rather
+# than ranking weak signals against each other and presenting them with
+# misleading max-normalized confidence.
+MIN_FUSED_SCORE = 0.005
+
 
 class _LRU:
     """Tiny LRU keyed by hashable. Used for embedded-query caching."""
@@ -86,23 +92,37 @@ class Engine:
         if not rank_lists:
             return []
 
-        if opts.mode == "hybrid":
+        is_hybrid = opts.mode == "hybrid"
+        if is_hybrid:
             results = reciprocal_rank_fusion(rank_lists, limit=fetch_limit, mode_labels=mode_labels)
         else:
             results = rank_lists[0]
 
         results = self._cwd_filter(results, opts)[: opts.limit]
-        results = self._normalize_scores(results)
+        results = self._normalize_scores(results, apply_floor=is_hybrid)
         results = self._enrich_snippets(results, query)
         return results
 
-    def _normalize_scores(self, results: list[SearchResult]) -> list[SearchResult]:
-        """Max-normalize so the top result is 1.0. Keeps relative ranking,
-        makes the displayed numbers intuitive (RRF scores are inherently
-        compressed to ~[0, 0.04])."""
+    def _normalize_scores(
+        self, results: list[SearchResult], apply_floor: bool = False,
+    ) -> list[SearchResult]:
+        """Max-normalize so the top result is 1.0.
+
+        For hybrid mode (apply_floor=True) we additionally enforce an
+        absolute peak floor: if the strongest fused RRF score is weaker
+        than MIN_FUSED_SCORE the query found no real signal — return
+        empty instead of dressing up noise as confident matches.
+
+        For single-mode results the per-mode searches already filter
+        weak hits (cosine threshold, FTS exact-token match), so we
+        shouldn't second-guess them here — applying the floor would
+        wipe out grep/filename results whose BM25 inverts are tiny
+        positive numbers."""
         if not results:
             return results
         peak = max(r.score for r in results)
+        if apply_floor and peak < MIN_FUSED_SCORE:
+            return []
         if peak <= 0.0:
             return results
         return [r.model_copy(update={"score": r.score / peak}) for r in results]

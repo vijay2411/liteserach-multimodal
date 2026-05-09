@@ -25,7 +25,7 @@ Mode = Literal["semantic", "grep", "filename", "vision"]
 _PROFILES: dict[str, dict[str, float]] = {
     "code":     {"semantic": 0.6, "grep": 2.0, "filename": 1.5, "vision": 0.0},
     "prose":    {"semantic": 1.5, "grep": 0.7, "filename": 1.0, "vision": 1.0},
-    "data":     {"semantic": 0.5, "grep": 1.2, "filename": 1.5, "vision": 0.0},
+    "data":     {"semantic": 0.5, "grep": 0.7, "filename": 1.5, "vision": 0.0},
     "notebook": {"semantic": 1.2, "grep": 1.0, "filename": 1.2, "vision": 0.5},
     "image":    {"semantic": 0.0, "grep": 0.0, "filename": 1.5, "vision": 2.0},
     "email":    {"semantic": 1.2, "grep": 1.5, "filename": 1.0, "vision": 0.0},
