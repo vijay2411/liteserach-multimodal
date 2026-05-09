@@ -381,3 +381,81 @@ def _power_set(mode: str) -> None:
         typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
         raise typer.Exit(3)
     typer.echo(f"power mode -> {body.get('mode')}")
+
+
+# ---- ssearch usage ----
+
+usage_app = typer.Typer(no_args_is_help=False, help="Show embedder spend + volume")
+ssearch_app.add_typer(usage_app, name="usage")
+
+
+@usage_app.callback(invoke_without_command=True)
+def usage_show(
+    ctx: typer.Context,
+    today: bool = typer.Option(False, "--today", help="Today only"),
+    month: bool = typer.Option(False, "--this-month", help="Calendar month (default)"),
+    all_time: bool = typer.Option(False, "--all", help="All recorded usage"),
+    provider: str = typer.Option("", "--provider", help="Filter by provider_id"),
+    since: str = typer.Option("", "--since", help="YYYY-MM-DD"),
+    until: str = typer.Option("", "--until", help="YYYY-MM-DD"),
+    json_output: bool = typer.Option(False, "--json", help="JSON output"),
+    csv_output: bool = typer.Option(False, "--csv", help="CSV output (one row per provider)"),
+):
+    if ctx.invoked_subcommand is not None:
+        return
+    params: dict[str, str] = {}
+    if since:
+        params["since"] = since
+    elif today:
+        from datetime import datetime, timezone
+        params["since"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    elif all_time:
+        params["since"] = "1970-01-01"
+    # else default = start of month (server-side default when 'since' omitted)
+    if until:
+        params["until"] = until
+    if provider:
+        params["provider"] = provider
+
+    try:
+        with _client() as c:
+            r = c.get("/v1/usage", params=params, timeout=30.0)
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+        raise typer.Exit(3)
+
+    if json_output:
+        typer.echo(json.dumps(body, indent=2))
+        return
+
+    if csv_output:
+        import csv as _csv
+        from io import StringIO
+        buf = StringIO()
+        w = _csv.writer(buf)
+        w.writerow(["provider_id", "model_id", "operation", "calls", "chunks",
+                    "input_tokens", "cost_usd", "duration_ms"])
+        for r in body.get("by_provider", []):
+            w.writerow([r["provider_id"], r["model_id"], r["operation"],
+                        r["calls"], r["chunks"], r["input_tokens"],
+                        f"{r['cost_usd']:.6f}", r["duration_ms"]])
+        typer.echo(buf.getvalue().rstrip())
+        return
+
+    typer.echo(f"calls:        {body.get('calls', 0)}")
+    typer.echo(f"chunks:       {body.get('chunks', 0)}")
+    typer.echo(f"tokens:       {body.get('input_tokens', 0):,}")
+    typer.echo(f"total spend:  ${body.get('cost_usd', 0):.4f}")
+    typer.echo("")
+    rows = body.get("by_provider", [])
+    if rows:
+        typer.echo(f"  {'provider':<10} {'model':<30} {'op':<14} {'calls':>6} "
+                   f"{'chunks':>6} {'tokens':>10} {'cost':>10}")
+        for r in rows:
+            typer.echo(
+                f"  {r['provider_id']:<10} {r['model_id']:<30} "
+                f"{r['operation']:<14} {r['calls']:>6} {r['chunks']:>6} "
+                f"{r['input_tokens']:>10,} ${r['cost_usd']:>8.4f}"
+            )

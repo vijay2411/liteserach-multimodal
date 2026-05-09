@@ -53,6 +53,27 @@ def health() -> dict:
     else:
         vision_section = _embedder_section(vision_em, "vision")
 
+    # Budget block — best-effort: skip if usage table or config aren't available.
+    budget_block: dict = {}
+    try:
+        from semanticsd import config as cfg_mod
+        from semanticsd.usage.budget import BudgetGate
+        cfg = cfg_mod.load()
+        gate = BudgetGate(
+            conn,
+            monthly_limit_usd=cfg.budget.monthly_limit_usd,
+            warning_threshold=cfg.budget.warning_threshold,
+        )
+        s = gate.status()
+        budget_block = {
+            "spent_this_month_usd": s.spent_this_month_usd,
+            "limit_usd": s.limit_usd,
+            "percent_used": s.percent_used,
+            "blocked": s.blocked,
+        }
+    except Exception as e:
+        budget_block = {"error": str(e)}
+
     overall_ok = db_ok and text_section["ok"] and vision_section["ok"]
     return {
         "status": "ok" if overall_ok else "degraded",
@@ -65,4 +86,5 @@ def health() -> dict:
         },
         # Back-compat: keep "embedder" pointing at text for older clients.
         "embedder": text_section,
+        "budget": budget_block,
     }

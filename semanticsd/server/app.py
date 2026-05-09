@@ -7,6 +7,7 @@ from semanticsd.server.routes import (
     health, presets, embedder_test,
     index as index_route, search as search_route,
     watch as watch_route, power as power_route,
+    usage as usage_route,
 )
 
 
@@ -37,4 +38,5 @@ def create_app(power_controller=None) -> FastAPI:
     app.include_router(search_route.router, prefix="/v1")
     app.include_router(watch_route.router, prefix="/v1")
     app.include_router(power_route.router, prefix="/v1")
+    app.include_router(usage_route.router, prefix="/v1")
     return app
