@@ -12,6 +12,17 @@ def _current_version(conn) -> int:
         return 0
 
 
+def _safe_run(conn, stmt: str) -> None:
+    """Run a statement; swallow 'duplicate column'/'already exists' on re-runs."""
+    try:
+        conn.execute(stmt)
+    except sqlite3.OperationalError as e:
+        msg = str(e).lower()
+        if "duplicate column" in msg or "already exists" in msg:
+            return
+        raise
+
+
 def apply(conn) -> None:
     """Apply all pending migrations. Idempotent."""
     current = _current_version(conn)
@@ -23,6 +34,9 @@ def apply(conn) -> None:
     if current < 2:
         for stmt in schema.DDL_V2:
             conn.execute(stmt)
+    if current < 3:
+        for stmt in schema.DDL_V3:
+            _safe_run(conn, stmt)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",

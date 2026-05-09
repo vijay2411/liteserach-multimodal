@@ -1,11 +1,12 @@
 """Schema DDL.
 
-Plan 1 created the relational tables. Plan 2 adds vec_embeddings (sqlite-vec
-virtual table) at dim=384 to match the default LocalEmbedder
-(BAAI/bge-small-en-v1.5).
+V1: relational tables (files, chunks, embedding_meta, jobs, usage, fts, meta).
+V2: vec_embeddings at dim=384 (legacy LocalEmbedder; kept for back-compat).
+V3: per-modality vec tables (vec_text_embeddings 768-d, vec_vision_embeddings
+    3072-d) + modality columns on chunks/embedding_meta + image_blob column.
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL_V1 = [
     """
@@ -91,6 +92,22 @@ DDL_V2 = [
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
         embedding FLOAT[384]
+    )
+    """,
+]
+
+DDL_V3 = [
+    "ALTER TABLE chunks ADD COLUMN modality TEXT NOT NULL DEFAULT 'text'",
+    "ALTER TABLE chunks ADD COLUMN image_blob BLOB",
+    "ALTER TABLE embedding_meta ADD COLUMN modality TEXT NOT NULL DEFAULT 'text'",
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_text_embeddings USING vec0(
+        embedding FLOAT[768]
+    )
+    """,
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_vision_embeddings USING vec0(
+        embedding FLOAT[3072]
     )
     """,
 ]
