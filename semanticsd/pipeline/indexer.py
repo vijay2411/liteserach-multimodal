@@ -109,6 +109,17 @@ class Indexer:
 
         if existing is not None:
             file_id = int(existing[0])
+            # Clear FTS rows for the chunks we're about to replace.
+            old_chunk_ids = [
+                int(r[0]) for r in self.conn.execute(
+                    "SELECT id FROM chunks WHERE file_id = ?", (file_id,)
+                )
+            ]
+            if old_chunk_ids:
+                ph = ",".join("?" for _ in old_chunk_ids)
+                self.conn.execute(
+                    f"DELETE FROM fts_chunks WHERE rowid IN ({ph})", old_chunk_ids
+                )
             self.conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
             self.conn.execute(
                 "UPDATE files SET modified_at = ?, size = ?, file_type = ?, indexed_at = ? WHERE id = ?",
@@ -121,6 +132,13 @@ class Indexer:
                 (str(path), int(stat.st_mtime), stat.st_size, doc.file_type, now),
             )
             file_id = int(cur.lastrowid)
+
+        # Re-populate FTS path entry on every (re)index.
+        self.conn.execute("DELETE FROM fts_paths WHERE rowid = ?", (file_id,))
+        self.conn.execute(
+            "INSERT INTO fts_paths(rowid, path) VALUES (?, ?)",
+            (file_id, str(path)),
+        )
 
         chunks_created = 0
         jobs_queued = 0
@@ -180,6 +198,10 @@ class Indexer:
                 (file_id, next_idx, ch.text, chash, ch.byte_start, ch.byte_end),
             )
             chunk_id = int(cur.lastrowid)
+            self.conn.execute(
+                "INSERT INTO fts_chunks(rowid, text) VALUES (?, ?)",
+                (chunk_id, ch.text),
+            )
             self.conn.execute(
                 "INSERT INTO jobs(chunk_id, status, attempts, created_at, updated_at) "
                 "VALUES (?, 'pending', 0, ?, ?)",

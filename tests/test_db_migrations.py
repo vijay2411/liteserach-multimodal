@@ -41,4 +41,5 @@ def test_schema_version_recorded(tmp_app_support):
     conn = connection.get_connection(paths.db_path())
     migrations.apply(conn)
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-    assert int(row[0]) == 3
+    from semanticsd.db.schema import SCHEMA_VERSION
+    assert int(row[0]) == SCHEMA_VERSION

@@ -37,6 +37,9 @@ def apply(conn) -> None:
     if current < 3:
         for stmt in schema.DDL_V3:
             _safe_run(conn, stmt)
+    if current < 4:
+        for stmt in schema.DDL_V4:
+            _safe_run(conn, stmt)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",

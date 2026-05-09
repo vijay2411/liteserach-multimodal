@@ -94,3 +94,70 @@ def test_indexer_persists_vision_chunk_with_blob(tmp_app_support, tmp_path):
     assert rows[0][1] is not None
     assert rows[0][1][:8].startswith(b"\x89PNG")
     assert len(rows[0][2]) == 64  # sha256 hex
+
+
+def test_indexer_populates_fts_chunks_and_paths(tmp_app_support, tmp_path):
+    from semanticsd.db import connection, migrations
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd import paths
+    from tests._fixtures import make_text
+
+    paths.ensure_dirs()
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    make_text(src, name="alpha.md", body="The quick brown fox jumps over the lazy dog.")
+
+    Indexer(conn=conn, max_file_size_mb=50).index_path(src)
+
+    # FTS chunks: query for a unique word
+    rows = conn.execute(
+        "SELECT rowid FROM fts_chunks WHERE fts_chunks MATCH 'fox'"
+    ).fetchall()
+    assert len(rows) >= 1
+
+    # FTS paths: query the filename
+    rows = conn.execute(
+        "SELECT rowid FROM fts_paths WHERE fts_paths MATCH 'alpha'"
+    ).fetchall()
+    assert len(rows) == 1
+
+
+def test_indexer_reindex_clears_old_fts(tmp_app_support, tmp_path):
+    """Re-indexing a changed file should not leave stale FTS rows."""
+    import os
+    import time
+    from semanticsd.db import connection, migrations
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd import paths
+    from tests._fixtures import make_text
+
+    paths.ensure_dirs()
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    p = make_text(src, name="z.md", body="original_token apples")
+
+    idx = Indexer(conn=conn, max_file_size_mb=50)
+    idx.index_path(src)
+    assert len(conn.execute(
+        "SELECT rowid FROM fts_chunks WHERE fts_chunks MATCH 'original_token'"
+    ).fetchall()) >= 1
+
+    # mutate file (different content + bumped mtime)
+    time.sleep(1.1)
+    p.write_text("replacement_token bananas")
+    os.utime(p, None)
+
+    idx.index_path(src)
+    # Old token gone, new token present
+    assert conn.execute(
+        "SELECT COUNT(*) FROM fts_chunks WHERE fts_chunks MATCH 'original_token'"
+    ).fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM fts_chunks WHERE fts_chunks MATCH 'replacement_token'"
+    ).fetchone()[0] >= 1

@@ -6,7 +6,7 @@ V3: per-modality vec tables (vec_text_embeddings 768-d, vec_vision_embeddings
     3072-d) + modality columns on chunks/embedding_meta + image_blob column.
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DDL_V1 = [
     """
@@ -110,4 +110,15 @@ DDL_V3 = [
         embedding FLOAT[3072]
     )
     """,
+]
+
+# V4: replace external-content FTS5 (content='files' / content='chunks') with
+# plain self-contained FTS5. External-content mode requires careful trigger
+# wiring; plain FTS5 lets us INSERT/DELETE directly from the indexer without
+# coupling lifetimes to the source tables.
+DDL_V4 = [
+    "DROP TABLE IF EXISTS fts_chunks",
+    "DROP TABLE IF EXISTS fts_paths",
+    "CREATE VIRTUAL TABLE fts_chunks USING fts5(text, tokenize='porter unicode61')",
+    "CREATE VIRTUAL TABLE fts_paths USING fts5(path, tokenize='unicode61')",
 ]
