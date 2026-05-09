@@ -19,6 +19,7 @@ tiktoken>=0.7
 
 # Plan 3 additions
 pypdf>=4.0
+pypdfium2>=4.30
 reportlab>=4.0
 python-docx>=1.1
 openpyxl>=3.1
