@@ -80,6 +80,11 @@ def _client() -> httpx.Client:
 def ssearch_root(
     ctx: typer.Context,
     status: bool = typer.Option(False, "--status", help="Show daemon status."),
+    presets: bool = typer.Option(False, "--presets", help="List available embedder presets."),
+    test_embedder: str = typer.Option(
+        "", "--test-embedder", metavar="PRESET",
+        help="Round-trip test the embedder for the given preset.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     if status:
@@ -97,10 +102,58 @@ def ssearch_root(
             typer.echo(f"status:    {body['status']}")
             typer.echo(f"version:   {body['version']}")
             typer.echo(f"doc_count: {body['doc_count']}")
-            typer.echo(f"embedder:  {body['embedder']['message']}")
+            emb = body.get("embedder", {})
+            typer.echo(f"embedder:  {emb.get('message','')}")
+            if emb.get("provider_id"):
+                typer.echo(f"  provider: {emb['provider_id']}")
+                typer.echo(f"  model:    {emb['model_id']}")
+                typer.echo(f"  dim:      {emb['dim']}")
+        return
+
+    if presets:
+        try:
+            with _client() as c:
+                r = c.get("/v1/presets")
+                r.raise_for_status()
+                body = r.json()
+        except httpx.HTTPError as e:
+            typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+            raise typer.Exit(3)
+        if json_output:
+            typer.echo(json.dumps(body, indent=2))
+        else:
+            for preset_id, info in body["presets"].items():
+                key_flag = "(needs API key)" if info.get("needs_api_key") else ""
+                url_flag = "(needs base URL)" if info.get("needs_base_url") else ""
+                model = info.get("default_model") or "<user-pick>"
+                typer.echo(f"  {preset_id:<20} model={model} {key_flag} {url_flag}".rstrip())
+        return
+
+    if test_embedder:
+        body_req = {"preset": test_embedder}
+        try:
+            with _client() as c:
+                r = c.post("/v1/embedder/test", json=body_req)
+                r.raise_for_status()
+                body = r.json()
+        except httpx.HTTPError as e:
+            typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+            raise typer.Exit(3)
+        if json_output:
+            typer.echo(json.dumps(body, indent=2))
+        else:
+            if body["ok"]:
+                typer.echo(f"OK  preset={test_embedder}")
+                typer.echo(f"  provider: {body['provider_id']}")
+                typer.echo(f"  model:    {body['model_id']}")
+                typer.echo(f"  dim:      {body['dim']}")
+                typer.echo(f"  latency:  {body['latency_ms']}ms")
+            else:
+                typer.echo(f"FAIL preset={test_embedder}: {body.get('error','unknown error')}")
+                raise typer.Exit(4)
         return
 
     if ctx.invoked_subcommand is None:
-        typer.echo("Usage: ssearch [QUERY] | --status | <subcommand>")
+        typer.echo("Usage: ssearch [QUERY] | --status | --presets | --test-embedder PRESET")
         typer.echo("Search subcommands land in Plan 5.")
         raise typer.Exit(0)
