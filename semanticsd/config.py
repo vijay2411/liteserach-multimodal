@@ -11,6 +11,31 @@ else:
     import tomli as tomllib
 
 
+def parse_interval(value: str | int | float) -> int:
+    """Parse a human-friendly interval into seconds.
+
+    Accepts: "30s", "30m", "1h", "6h", "2d" — or a raw int/float number of
+    seconds. Whitespace tolerated. Plain digit strings parse as seconds.
+    """
+    if isinstance(value, (int, float)):
+        return int(value)
+    s = str(value).strip().lower()
+    if not s:
+        raise ValueError("empty interval")
+    if s.isdigit():
+        return int(s)
+    suffix = s[-1]
+    body = s[:-1]
+    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    if suffix not in multipliers:
+        raise ValueError(f"unknown interval suffix in {value!r} (use s/m/h/d)")
+    try:
+        n = float(body)
+    except ValueError as e:
+        raise ValueError(f"could not parse interval {value!r}") from e
+    return int(n * multipliers[suffix])
+
+
 class WatchConfig(BaseModel):
     directories: list[str] = []
     ignore_patterns: list[str] = [".git", "node_modules", ".DS_Store", "target", "build", "*.o"]
