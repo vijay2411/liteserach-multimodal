@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import sqlite3
+import time
 from collections import OrderedDict
 from pathlib import Path
 from semanticsd.embedders.router import EmbedderRouter
@@ -11,6 +12,7 @@ from semanticsd.search.grep import search_grep
 from semanticsd.search.semantic import search_semantic_text, search_semantic_vision
 from semanticsd.search.fusion import reciprocal_rank_fusion
 from semanticsd.search.snippets import extract_snippet, tokenize_query
+from semanticsd.usage.recorder import UsageEvent, record_usage, compute_cost
 
 log = logging.getLogger(__name__)
 
@@ -135,8 +137,11 @@ class Engine:
         vec = self._cache_text.get(cache_key)
         if vec is None:
             try:
+                t0 = time.monotonic()
                 res = text_em.embed([query], kind="query")
+                dt_ms = int((time.monotonic() - t0) * 1000)
                 vec = res.vectors[0] if res.vectors else []
+                self._record_query_usage(text_em, "query_embed", res, dt_ms)
             except Exception as e:
                 log.warning("text embed for query failed: %s", e)
                 return []
@@ -174,15 +179,23 @@ class Engine:
             from semanticsd.embedders.gemini import GeminiTextEmbedder
             sibling = GeminiTextEmbedder(api_key=vision_em.api_key, model=vision_em.model_id)
             try:
+                t0 = time.monotonic()
                 res = sibling.embed([query], kind="query")
+                dt_ms = int((time.monotonic() - t0) * 1000)
+                self._record_query_usage(vision_em, "query_embed", res, dt_ms)
                 return res.vectors[0] if res.vectors else []
             except Exception as e:
                 log.warning("gemini cross-modal text embed failed: %s", e)
                 return []
         if isinstance(vision_em, LocalQwen3VisionEmbedder):
             try:
+                t0 = time.monotonic()
                 model = vision_em._ensure_model()
                 vec = model.encode([query], normalize_embeddings=True)
+                dt_ms = int((time.monotonic() - t0) * 1000)
+                # Local; cost=0. Still record for volume tracking.
+                self._record_query_usage_synthetic(vision_em, "query_embed",
+                                                   tokens=len(query) // 4, dt_ms=dt_ms)
                 return [float(x) for x in vec[0]]
             except Exception as e:
                 log.warning("qwen3-vl cross-modal text embed failed: %s", e)
@@ -198,6 +211,42 @@ class Engine:
         if not prefix.endswith("/"):
             prefix = prefix + "/"
         return [r for r in results if r.path == prefix.rstrip("/") or r.path.startswith(prefix)]
+
+    def _record_query_usage(self, embedder, operation: str, result, dt_ms: int) -> None:
+        """Write one row to `usage` for a query-time embedder call. Cost is
+        computed from the embedder's per-token rate; rate=0 still records the
+        row so reports show query volume on local providers."""
+        rate = float(getattr(embedder, "cost_per_million_input_tokens_usd",
+                             getattr(embedder, "cost_per_million_image_tokens_usd", 0.0)))
+        try:
+            record_usage(self.conn, UsageEvent(
+                provider_id=embedder.provider_id,
+                model_id=embedder.model_id,
+                operation=operation,
+                input_tokens=int(getattr(result, "input_tokens", 0)),
+                chunk_count=1,           # one query
+                duration_ms=dt_ms,
+                cost_usd=compute_cost(int(getattr(result, "input_tokens", 0)), rate),
+            ))
+        except Exception as e:
+            log.debug("query usage record failed: %s", e)
+
+    def _record_query_usage_synthetic(self, embedder, operation: str,
+                                       tokens: int, dt_ms: int) -> None:
+        """For local embedders (sentence-transformers etc.) where there's no
+        EmbedResult — record best-effort token count + zero cost."""
+        try:
+            record_usage(self.conn, UsageEvent(
+                provider_id=embedder.provider_id,
+                model_id=embedder.model_id,
+                operation=operation,
+                input_tokens=int(tokens),
+                chunk_count=1,
+                duration_ms=dt_ms,
+                cost_usd=0.0,
+            ))
+        except Exception as e:
+            log.debug("synthetic usage record failed: %s", e)
 
     def _enrich_snippets(self, results: list[SearchResult], query: str) -> list[SearchResult]:
         terms = tokenize_query(query)

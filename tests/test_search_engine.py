@@ -140,3 +140,27 @@ def test_engine_caches_query_embedding(tmp_path):
     n1 = call_count["n"]
     engine.search("alpha", SearchOptions(all=True, mode="semantic"))
     assert call_count["n"] == n1, "second call should hit cache"
+
+
+def test_engine_records_query_usage(tmp_path):
+    """Each query that touches a paid text embedder should write a usage row."""
+    db = tmp_path / "e.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+    _seed(conn)
+
+    class _Paid(FakeText):
+        provider_id = "paid_q"; model_id = "pq"
+        cost_per_million_input_tokens_usd = 0.5
+
+    text_em = _Paid()
+    router = EmbedderRouter(text=text_em)
+    engine = Engine(conn, router)
+    engine.search("alpha contents about FOXes",
+                  SearchOptions(all=True, mode="semantic"))
+
+    rows = conn.execute(
+        "SELECT provider_id, operation, chunk_count FROM usage"
+    ).fetchall()
+    assert len(rows) >= 1
+    assert any(r[0] == "paid_q" and r[1] == "query_embed" for r in rows)
