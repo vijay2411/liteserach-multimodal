@@ -2,21 +2,26 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 from pydantic import BaseModel
 
 
 class ExtractedSegment(BaseModel):
-    """One contiguous chunk of extracted text (e.g. a paragraph, page, or slide).
+    """One contiguous chunk of extracted content (text or image).
 
-    `byte_start` and `byte_end` are byte offsets within the *extracted text*
-    (not within the original binary). They let us point search results back to
-    a region of the doc for highlighting.
+    For text segments: `text` holds the content; `byte_start`/`byte_end` are
+    offsets into the extracted text. `image_data` is None.
+
+    For vision segments: `image_data` holds raw image bytes (PNG/JPEG/WebP).
+    `text` holds a synthetic descriptor (e.g. "<image: page=3>") used for
+    FTS and result display. `byte_start`/`byte_end` cover the descriptor.
     """
     text: str
     byte_start: int
     byte_end: int
     metadata: dict = {}  # e.g. {"page": 2}, {"slide": 3}
+    modality: Literal["text", "vision"] = "text"
+    image_data: bytes | None = None
 
 
 class ExtractedDoc(BaseModel):
