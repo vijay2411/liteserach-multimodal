@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from semanticsd import __version__
-from semanticsd.server.routes import health
+from semanticsd.server.routes import health, presets
 
 
 def create_app() -> FastAPI:
@@ -20,4 +20,5 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(health.router, prefix="/v1")
+    app.include_router(presets.router, prefix="/v1")
     return app
