@@ -161,3 +161,72 @@ def test_indexer_reindex_clears_old_fts(tmp_app_support, tmp_path):
     assert conn.execute(
         "SELECT COUNT(*) FROM fts_chunks WHERE fts_chunks MATCH 'replacement_token'"
     ).fetchone()[0] >= 1
+
+
+def test_unindex_path_removes_file_chunks_fts(tmp_app_support, tmp_path):
+    from semanticsd.db import connection, migrations
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd import paths
+    from tests._fixtures import make_text
+
+    paths.ensure_dirs()
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    p = make_text(src, name="alpha.md", body="UNIQUEMARKER12345 some content here")
+    indexer = Indexer(conn=conn, max_file_size_mb=50)
+    indexer.index_path(src)
+
+    n_files_before = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    n_chunks_before = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    n_fts_before = conn.execute(
+        "SELECT COUNT(*) FROM fts_chunks WHERE fts_chunks MATCH 'UNIQUEMARKER12345'"
+    ).fetchone()[0]
+    assert n_files_before >= 1 and n_chunks_before >= 1 and n_fts_before >= 1
+
+    removed = indexer.unindex_path(p)
+    assert removed == 1
+    assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == n_files_before - 1
+    assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == n_chunks_before - 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM fts_chunks WHERE fts_chunks MATCH 'UNIQUEMARKER12345'"
+    ).fetchone()[0] == 0
+
+
+def test_unindex_path_handles_directory_prefix(tmp_app_support, tmp_path):
+    from semanticsd.db import connection, migrations
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd import paths
+    from tests._fixtures import make_text
+
+    paths.ensure_dirs()
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    make_text(src, name="alpha.md", body="content one")
+    make_text(src, name="beta.md", body="content two")
+    indexer = Indexer(conn=conn, max_file_size_mb=50)
+    indexer.index_path(src)
+    assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 2
+
+    removed = indexer.unindex_path(src)
+    assert removed == 2
+    assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+
+
+def test_unindex_path_idempotent(tmp_app_support, tmp_path):
+    from semanticsd.db import connection, migrations
+    from semanticsd.pipeline.indexer import Indexer
+    from semanticsd import paths
+
+    paths.ensure_dirs()
+    conn = connection.get_connection(paths.db_path())
+    migrations.apply(conn)
+    indexer = Indexer(conn=conn, max_file_size_mb=50)
+
+    assert indexer.unindex_path(tmp_path / "nonexistent") == 0

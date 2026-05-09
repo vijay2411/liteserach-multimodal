@@ -28,6 +28,71 @@ class Indexer:
         self.matcher = IgnoreMatcher(patterns=ignore_patterns, include_defaults=True)
         self.chunker = chunker or SlidingWindowChunker()
 
+    def unindex_path(self, path: Path) -> int:
+        """Remove file(s) under `path` from the index.
+
+        Returns the number of file rows removed. Handles directory
+        deletion via prefix matching. Cleans up FTS5 + every per-modality
+        vec table since those are virtual tables and don't auto-cascade
+        through SQLite foreign keys.
+        """
+        s = str(path.resolve()) if path.is_absolute() else str(path)
+        rows = self.conn.execute(
+            "SELECT id FROM files WHERE path = ? OR path LIKE ?",
+            (s, s + "/%"),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        file_ids = [int(r[0]) for r in rows]
+        ph_files = ",".join("?" for _ in file_ids)
+
+        chunk_rows = self.conn.execute(
+            f"SELECT id FROM chunks WHERE file_id IN ({ph_files})",
+            file_ids,
+        ).fetchall()
+        chunk_ids = [int(r[0]) for r in chunk_rows]
+
+        if chunk_ids:
+            ph_chunks = ",".join("?" for _ in chunk_ids)
+            self.conn.execute(
+                f"DELETE FROM fts_chunks WHERE rowid IN ({ph_chunks})", chunk_ids
+            )
+            for vec_table in self._existing_vec_tables():
+                try:
+                    self.conn.execute(
+                        f"DELETE FROM {vec_table} WHERE rowid IN ({ph_chunks})",
+                        chunk_ids,
+                    )
+                except sqlite3.OperationalError as e:
+                    log.warning("delete from %s failed: %s", vec_table, e)
+            self.conn.execute(
+                f"DELETE FROM embedding_meta WHERE chunk_id IN ({ph_chunks})",
+                chunk_ids,
+            )
+            self.conn.execute(
+                f"DELETE FROM jobs WHERE chunk_id IN ({ph_chunks})", chunk_ids
+            )
+            self.conn.execute(
+                f"DELETE FROM chunks WHERE id IN ({ph_chunks})", chunk_ids
+            )
+
+        self.conn.execute(
+            f"DELETE FROM fts_paths WHERE rowid IN ({ph_files})", file_ids
+        )
+        self.conn.execute(
+            f"DELETE FROM files WHERE id IN ({ph_files})", file_ids
+        )
+        return len(file_ids)
+
+    def _existing_vec_tables(self) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'vec_%' "
+            "AND name NOT LIKE '%_info' AND name NOT LIKE '%_chunks' "
+            "AND name NOT LIKE '%_rowids' AND name NOT LIKE '%_vector_chunks%'"
+        ).fetchall()
+        return [r[0] for r in rows]
+
     def index_path(self, path: Path) -> dict[str, int]:
         path = path.resolve()
         files_indexed = 0
