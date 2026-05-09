@@ -1,7 +1,9 @@
 """FastAPI app factory."""
 from __future__ import annotations
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from semanticsd import __version__
 from semanticsd.server.routes import (
     health, presets, embedder_test,
@@ -9,7 +11,10 @@ from semanticsd.server.routes import (
     watch as watch_route, power as power_route,
     usage as usage_route,
     reembed as reembed_route,
+    image as image_route,
 )
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(power_controller=None) -> FastAPI:
@@ -41,4 +46,15 @@ def create_app(power_controller=None) -> FastAPI:
     app.include_router(power_route.router, prefix="/v1")
     app.include_router(usage_route.router, prefix="/v1")
     app.include_router(reembed_route.router, prefix="/v1")
+    app.include_router(image_route.router, prefix="/v1")
+
+    # Serve the bundled web UI at /. The single-page app uses the same /v1
+    # endpoints over fetch(); auth token is collected once via a setup modal
+    # and stashed in localStorage. No build step or external assets.
+    index_html = _STATIC_DIR / "index.html"
+    if index_html.exists():
+        @app.get("/", include_in_schema=False)
+        def _ui_root():
+            return FileResponse(index_html)
+
     return app

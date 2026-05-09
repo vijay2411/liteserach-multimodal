@@ -54,3 +54,7 @@ dumps/
 
 # node (in case you bolt on a Raycast extension etc.)
 node_modules/
+
+# Screenshots from Playwright UI testing
+ui-*.png
+.playwright-mcp/

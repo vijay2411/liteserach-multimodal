@@ -1,6 +1,6 @@
 """Bearer-token auth dependency for FastAPI routes."""
 from __future__ import annotations
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Query, status
 from semanticsd import keychain
 
 _token_cache: str | None = None
@@ -30,4 +30,23 @@ def require_token(x_auth_token: str | None = Header(default=None)) -> None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or missing X-Auth-Token",
+        )
+
+
+def require_token_or_query(
+    x_auth_token: str | None = Header(default=None),
+    token: str | None = Query(default=None),
+) -> None:
+    """Accept the token via either header OR ?token= query param.
+
+    Required for endpoints called by browser <img> / <a> elements that
+    can't set custom headers — namely the image-blob endpoint used by
+    the web UI.
+    """
+    expected = get_expected_token()
+    candidate = x_auth_token or token
+    if not candidate or candidate != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing token",
         )
