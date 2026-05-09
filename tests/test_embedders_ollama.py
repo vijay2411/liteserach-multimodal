@@ -37,9 +37,9 @@ def test_default_base_url_is_localhost(fake_openai):
     assert e.base_url == "http://localhost:11434/v1"
 
 
-def test_default_model_is_nomic(fake_openai):
+def test_default_model_is_embeddinggemma(fake_openai):
     e = OllamaEmbedder()
-    assert e.model_id == "nomic-embed-text"
+    assert e.model_id == "embeddinggemma"
     assert e.dim == 768
 
 

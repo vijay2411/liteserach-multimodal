@@ -22,7 +22,7 @@ PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "ollama": {
         "class": "OllamaEmbedder",
-        "default_model": "nomic-embed-text",
+        "default_model": "embeddinggemma",
         "needs_api_key": False,
         "needs_base_url": False,
         "default_base_url": "http://localhost:11434/v1",

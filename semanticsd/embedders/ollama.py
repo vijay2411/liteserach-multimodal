@@ -6,7 +6,7 @@ from semanticsd.embedders.openai_compatible import OpenAICompatibleEmbedder
 
 
 DEFAULT_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "nomic-embed-text"
+DEFAULT_MODEL = "embeddinggemma"  # Google's open embedding model (300M, 768-d, Matryoshka)
 DEFAULT_DIM = 768
 
 
