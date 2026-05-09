@@ -8,12 +8,46 @@ reference.
 
 ## 🚀 Install
 
-### 1. Clone and install Python deps
+### 1. Clone the repo
 
 ```bash
 git clone git@github.com:vijay2411/liteserach-multimodal.git
 cd liteserach-multimodal
-make install      # creates .venv, installs everything
+```
+
+### 2. Install — pick ONE path
+
+> ⚠️ Whatever you pick, **do not run `python -m semanticsd ...`** from the
+> repo root with system Python. The deps live in a venv. You'll get
+> `ModuleNotFoundError: No module named 'keyring'`.
+
+#### 🥇 pipx (recommended for production)
+
+Makes `semanticsd` and `ssearch` available from any directory.
+
+```bash
+brew install pipx
+pipx ensurepath          # adds ~/.local/bin to PATH (restart shell after)
+pipx install -e .
+
+# Now from anywhere:
+semanticsd install
+ssearch dashboard
+```
+
+#### 🥈 Project venv (good for development)
+
+```bash
+make install             # creates .venv/, pip-installs deps + this package
+
+# Use the venv-bundled scripts (shebangs point at .venv/bin/python):
+.venv/bin/semanticsd install
+.venv/bin/ssearch "..."
+
+# OR activate the venv in your shell:
+source .venv/bin/activate
+semanticsd install       # works as long as venv is active
+deactivate               # when done
 ```
 
 ### 2. Verify your Python build supports sqlite-vec
