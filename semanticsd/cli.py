@@ -459,3 +459,43 @@ def usage_show(
                 f"{r['operation']:<14} {r['calls']:>6} {r['chunks']:>6} "
                 f"{r['input_tokens']:>10,} ${r['cost_usd']:>8.4f}"
             )
+
+
+# ---- ssearch reembed ----
+
+reembed_app = typer.Typer(no_args_is_help=False,
+                          help="Queue re-embed jobs after switching embedder providers")
+ssearch_app.add_typer(reembed_app, name="reembed")
+
+
+def _reembed_call(modality: str) -> None:
+    try:
+        with _client() as c:
+            r = c.post("/v1/reembed", json={"modality": modality}, timeout=60.0)
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+        raise typer.Exit(3)
+    typer.echo(f"queued: text={body['queued']['text']}, vision={body['queued']['vision']} "
+               f"(total {body['total']})")
+
+
+@reembed_app.callback(invoke_without_command=True)
+def reembed_root(ctx: typer.Context):
+    """Queue both text and vision re-embed jobs (default)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _reembed_call("all")
+
+
+@reembed_app.command("text")
+def reembed_text():
+    """Queue text re-embed jobs only."""
+    _reembed_call("text")
+
+
+@reembed_app.command("vision")
+def reembed_vision():
+    """Queue vision re-embed jobs only."""
+    _reembed_call("vision")
