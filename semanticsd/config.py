@@ -12,7 +12,7 @@ else:
 
 
 class WatchConfig(BaseModel):
-    directories: list[str] = ["~/"]
+    directories: list[str] = []
     ignore_patterns: list[str] = [".git", "node_modules", ".DS_Store", "target", "build", "*.o"]
     max_file_size_mb: int = 50
 
@@ -86,7 +86,7 @@ def load(path: Path | None = None) -> Config:
 
 DEFAULT_TOML = """\
 [watch]
-directories = ["~/"]
+directories = []
 ignore_patterns = [".git", "node_modules", ".DS_Store", "target", "build", "*.o"]
 max_file_size_mb = 50
 
