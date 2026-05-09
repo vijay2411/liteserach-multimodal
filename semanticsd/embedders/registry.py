@@ -7,10 +7,13 @@ PROVIDER_REGISTRY maps preset id -> spec dict consumed by both the factory
 from __future__ import annotations
 from typing import Any, Type
 from semanticsd.embedders.base import Embedder
+from semanticsd.embedders.vision_base import VisionEmbedder
 from semanticsd.embedders.local import LocalEmbedder
 from semanticsd.embedders.openai import OpenAIEmbedder
 from semanticsd.embedders.ollama import OllamaEmbedder
 from semanticsd.embedders.openai_compatible import OpenAICompatibleEmbedder
+from semanticsd.embedders.gemini import GeminiTextEmbedder
+from semanticsd.embedders.gemini_vision import GeminiVisionEmbedder
 
 
 PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
@@ -47,6 +50,12 @@ PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "needs_api_key": True,
         "needs_base_url": False,
     },
+    "gemini": {
+        "class": "GeminiTextEmbedder",
+        "default_model": "gemini-embedding-2",
+        "needs_api_key": True,
+        "needs_base_url": False,
+    },
     "openai_compatible": {
         "class": "OpenAICompatibleEmbedder",
         "default_model": None,
@@ -66,6 +75,21 @@ _CLASS_BY_NAME: dict[str, Type[Embedder]] = {
     "OllamaEmbedder": OllamaEmbedder,
     "OpenAIEmbedder": OpenAIEmbedder,
     "OpenAICompatibleEmbedder": OpenAICompatibleEmbedder,
+    "GeminiTextEmbedder": GeminiTextEmbedder,
+}
+
+
+VISION_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
+    "gemini": {
+        "class": "GeminiVisionEmbedder",
+        "default_model": "gemini-embedding-2",
+        "needs_api_key": True,
+        "needs_base_url": False,
+    },
+}
+
+_VISION_CLASS_BY_NAME: dict[str, Type[VisionEmbedder]] = {
+    "GeminiVisionEmbedder": GeminiVisionEmbedder,
 }
 
 
@@ -97,6 +121,11 @@ def build_embedder(preset: str, config: dict[str, Any]) -> Embedder:
             model=config.get("model") or entry["default_model"],
             dimensions=config.get("dimensions", 0),
         )
+    if cls is GeminiTextEmbedder:
+        return GeminiTextEmbedder(
+            api_key=config["api_key"],
+            model=config.get("model") or entry["default_model"],
+        )
     if cls is OllamaEmbedder:
         base_url = config.get("base_url") or entry.get("default_base_url")
         return OllamaEmbedder(
@@ -119,3 +148,19 @@ def build_embedder(preset: str, config: dict[str, Any]) -> Embedder:
             dimensions=config.get("dimensions", 0),
         )
     raise ValueError(f"no factory branch for class {entry['class']!r}")
+
+
+def build_vision_embedder(preset: str, config: dict[str, Any]) -> VisionEmbedder:
+    """Construct a VisionEmbedder from a preset id + config dict."""
+    if preset not in VISION_PROVIDER_REGISTRY:
+        raise ValueError(f"unknown vision embedder preset: {preset!r}")
+    entry = VISION_PROVIDER_REGISTRY[preset]
+    cls = _VISION_CLASS_BY_NAME[entry["class"]]
+    if entry["needs_api_key"] and not config.get("api_key"):
+        raise ValueError(f"vision preset {preset!r} requires an api_key")
+    if cls is GeminiVisionEmbedder:
+        return GeminiVisionEmbedder(
+            api_key=config["api_key"],
+            model=config.get("model") or entry["default_model"],
+        )
+    raise ValueError(f"no factory branch for vision class {entry['class']!r}")

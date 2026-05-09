@@ -72,3 +72,37 @@ def test_unknown_preset_raises():
     except ValueError:
         return
     raise AssertionError("expected ValueError for unknown preset")
+
+
+def test_gemini_in_text_registry():
+    assert "gemini" in registry.PROVIDER_REGISTRY
+    e = registry.PROVIDER_REGISTRY["gemini"]
+    assert e["needs_api_key"] is True
+    assert e["default_model"] == "gemini-embedding-2"
+
+
+def test_build_gemini_text():
+    e = registry.build_embedder("gemini", {"api_key": "k"})
+    assert e.provider_id == "gemini"
+    assert e.dim == 3072
+    assert e.model_id == "gemini-embedding-2"
+
+
+def test_gemini_in_vision_registry():
+    assert "gemini" in registry.VISION_PROVIDER_REGISTRY
+
+
+def test_build_gemini_vision():
+    e = registry.build_vision_embedder("gemini", {"api_key": "k"})
+    assert e.provider_id == "gemini"
+    assert e.dim == 3072
+
+
+def test_build_vision_requires_key():
+    with pytest.raises(ValueError):
+        registry.build_vision_embedder("gemini", {})
+
+
+def test_build_vision_unknown_preset():
+    with pytest.raises(ValueError):
+        registry.build_vision_embedder("nope", {"api_key": "k"})
