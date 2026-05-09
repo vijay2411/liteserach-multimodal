@@ -19,3 +19,7 @@ node_modules/
 sandbox/.semanticsd/
 sandbox-docs/
 sandbox-docs-local/
+stress-corpus/
+sandbox-stress/
+sandbox-docs-v2/
+scripts/_*.py
