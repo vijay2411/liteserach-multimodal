@@ -1,234 +1,185 @@
-# SemanticsD — local multimodal semantic search for macOS
+# 🔍 SemanticsD
 
-A daemon that indexes the files on your Mac and lets you search them
-semantically — by meaning, not just by exact text — across **text, code,
-PDFs, images, and audio**, all at once. Runs entirely on your machine
-(plus optional API providers you configure), watches your folders for
-changes via FSEvents, and exposes both an HTTP API and an `ssearch` CLI.
+> **Local multimodal semantic search for macOS — find your files by what they mean, not what they're named.**
 
-```
-$ ssearch "There is no alternative" --all
-~/Documents/sku_001_fold.jpg                   (vision, score=1.000)
-  <image: sku_001_fold.jpg>
-
-~/Documents/Obsidian Vault/Daily Journal/...   (semantic, score=0.62)
-  ...framing flexes per audience. Don't change who you are...
-```
-
-The query above works because cross-modal embedders (Gemini Embedding 2,
-Qwen3-VL) put text and image vectors in the same space — a slogan tshirt
-gets surfaced from a text query.
+Type `tshirt photo` and the daemon surfaces a screenshot you saved 3 months ago — even though the filename is `sku_001_fold.jpg`. Type `there is no alternative` and it finds the photo of a slogan tee you took at a friend's place. Across text, code, PDFs, images, and audio. On your Mac. Indexing in the background. No data leaves your machine unless you opt in to a cloud embedder.
 
 ---
 
-## What's in the box
+## ✨ What this is
 
-- **Indexing** — extracts text from `.md/.txt/.pdf/.docx/.xlsx/.pptx/.epub/.rtf/.html/.eml/.ipynb`, OCRs images via Tesseract (optional fallback), transcribes audio via Whisper.
-- **Multi-modal embedding** — pluggable per-modality:
-  - **Text**: Ollama (embeddinggemma, nomic-embed-text), OpenAI, OpenAI-compatible (LM Studio / vLLM / TEI), local sentence-transformers, Gemini.
-  - **Vision**: Gemini Embedding 2 (cloud, 3072-d), local **Qwen3-VL-Embedding-2B** via sentence-transformers + MPS (2048-d, ~5GB RAM, no API key).
-- **Storage** — sqlite-vec virtual tables, one per `(modality, dim)` combo so multiple providers coexist non-destructively. FTS5 with porter+unicode61 for grep + filename. Content-hash dedup so identical chunks aren't re-embedded.
-- **Search** — semantic + filename + grep + hybrid mode with reciprocal-rank fusion, per-file-type weights (code boosts grep, prose boosts semantic, images route to vision-only), CWD-scoped by default, **file-collapse** so the same PDF doesn't flood the result list, cross-modal text→image queries.
-- **FSEvents watcher** — drop a file in a watched dir, it's searchable in ~3-5s. Delete and it's unindexed.
-- **Power modes** — `active` (watcher live) vs `saver` (watcher off, periodic full-walk). Optional auto-switch when you unplug from AC.
-- **Cost tracking** — every embedder call writes a `usage` row. Monthly budget cap fail-closes when exceeded; `ssearch usage` surfaces spend.
-- **Provider-switch reembed** — `ssearch reembed` queues jobs for chunks that don't yet have a vector from your *currently configured* embedder. Old vectors stay queryable for rollback.
-- **Auth** — bearer token, stored in macOS Keychain. CORS-locked to localhost.
+- 🧠 A **search daemon** that runs in the background and watches your folders.
+- 🎨 **Multimodal**: text, code, PDFs, scanned images, screenshots, voice notes — all queryable from one search bar.
+- 🔌 **Provider-agnostic**: pick local (Ollama, sentence-transformers, Qwen3-VL on MPS) or cloud (Gemini, OpenAI) embedders, switch at any time, mix and match per modality.
+- ⚡ **Live**: drop a file in a watched folder → searchable in ~3 seconds via FSEvents.
+- 💾 **One sqlite-vec database** for everything. No vector DB to host.
+- 🖥️ **CLI + HTTP API + (coming) web UI** — use it however you want.
+- 🪪 **MIT-licensed**, ~5k lines of well-tested Python (332 unit + 56 e2e tests).
 
-## Install
+## ❌ What this isn't
 
-Requires macOS, Python ≥3.11 (3.13 recommended), and SQLite with loadable
-extension support. Apple-Silicon Homebrew Python works out of the box;
-pyenv builds need `--enable-loadable-sqlite-extensions`.
+- 🚫 **Not** a Spotlight replacement — it complements it. Spotlight is exact-match metadata; we do meaning.
+- 🚫 **Not** a vector DB. We use one (sqlite-vec) but you don't manage it.
+- 🚫 **Not** a RAG framework or LLM agent. It's the *retrieval* half — bring your own LLM if you want generation.
+- 🚫 **Not** a cloud service. Runs locally; the only network calls are to your configured embedder providers.
+- 🚫 **Not** cross-platform yet — macOS-only (FSEvents, launchd, Keychain, MPS). Linux/Windows would need wiring.
+- 🚫 **Not** a polished consumer product. It's a working power-user tool with rough edges.
 
-```bash
-git clone git@github.com:vijay2411/litesearch-multimodal.git
-cd litesearch-multimodal
-make install
+## 💪 Why this exists
+
+Modern macOS search is broken for the way I actually use my Mac:
+
+| Tool | Limitation |
+|---|---|
+| **Spotlight / Finder** | Filename + literal text only. Can't find "that tshirt photo" if the file is `IMG_2841.jpg`. |
+| **`ripgrep` / grep** | Substring match. "Bank statement" won't find a PDF where it's encoded as the literal word "Statement". |
+| **Notion AI / Obsidian Smart Connections** | Locked to one app's data. Can't search across all my files. |
+| **Apple Intelligence** | Closed, unpredictable, no API, can't switch the model, can't index what *you* want indexed. |
+| **Spotlight QuickLook OCR** | Sometimes works, often doesn't, no semantic layer at all. |
+
+I wanted **one search across everything I own, by meaning, with the model I choose, on hardware I own**. So I built it.
+
+## 👥 Who this is for
+
+✅ **Use this if you:**
+
+- 🛠️ Are a **power user / developer** who's comfortable editing TOML and reading CLI output.
+- 💻 Live on **macOS** (Apple Silicon ideally — local models run on MPS).
+- 🧑‍💼 Have a sprawl of **Documents / Obsidian / Code / screenshots** you can never find things in.
+- 🎯 Want to **swap embedder models** to experiment (Ollama → Gemini → Qwen3-VL → ...).
+- 🔒 Care about **keeping your data local** — at least for the text side.
+- 🤖 Want to wire local search into Claude / Raycast / your own scripts via HTTP.
+
+❌ **Don't use this if you:**
+
+- 🪟 Are on **Windows or Linux**.
+- 🖱️ Want a **one-click installer with a GUI**. (We have a CLI installer, but you'll edit a config.)
+- ☁️ Want a **fully-managed cloud** product (try Pinecone / Weaviate / Supabase Vector instead).
+- 📧 Want to search **Gmail / Slack / Notion** (only files on disk are indexed; integrations are out of scope for v1).
+- 📊 Need it for **enterprise** — no SSO, no audit logs, no SLAs.
+- 🤔 Don't know what an "embedding" is and don't want to learn (this needs *some* mental model to configure well).
+
+## 🔧 Tech stack
+
+| Layer | Tech |
+|---|---|
+| **Language** | Python 3.11+ (3.13 recommended) |
+| **Runtime** | macOS launchd, FastAPI + Uvicorn |
+| **Storage** | SQLite + [sqlite-vec](https://github.com/asg017/sqlite-vec) (vector ANN) + FTS5 (full-text) |
+| **File watching** | [watchdog](https://python-watchdog.readthedocs.io/) (uses FSEvents on macOS) |
+| **Auth** | macOS Keychain via `keyring` |
+| **Text embedders** | Ollama, OpenAI, OpenAI-compatible (LM Studio / vLLM / TEI), Gemini, sentence-transformers |
+| **Vision embedders** | Gemini Embedding 2 (cloud), Qwen3-VL-Embedding-2B (local via MPS) |
+| **Extractors** | pypdf, pypdfium2, python-docx, openpyxl, python-pptx, ebooklib, beautifulsoup4, striprtf, pytesseract (OCR), faster-whisper (audio) |
+
+## ⚠️ Requirements
+
+> 📌 **Read these carefully — most install issues are one of these.**
+
+| Requirement | Why | How to verify |
+|---|---|---|
+| **macOS 13+** (Apple Silicon recommended) | FSEvents, launchd, Keychain, MPS | `sw_vers` |
+| **Python 3.11+ with `enable_load_extension`** | sqlite-vec is a loadable extension | `python -c "import sqlite3; sqlite3.connect(':memory:').enable_load_extension(True)"` should not error. **Pyenv builds usually fail this** — use Homebrew Python (`brew install python@3.13`) instead. |
+| **~500MB disk** for the daemon + base models | indexer + small text embedders | — |
+| **+5GB disk** if using local Qwen3-VL | the 2B vision model | one-time download on first vision query |
+| **Ollama** (optional, for local text embeddings) | hosts embeddinggemma, nomic-embed-text, etc. | `ollama list` |
+| **Gemini API key** (optional, for cloud vision) | text→image cross-modal | https://aistudio.google.com/apikey |
+| **Tesseract** (optional, for OCR fallback) | when no vision embedder is configured | `brew install tesseract` |
+
+---
+
+## 🧠 How it works under the hood
+
+### Big picture
+
+```
+┌─────────────────┐
+│  ~/Documents    │  ← you drop / edit / delete files
+│  ~/Code         │
+└────────┬────────┘
+         │
+         ▼  FSEvents (kernel-level file change events)
+┌─────────────────────────────────────────────────────┐
+│  WATCHER → DEBOUNCE → DIRTY QUEUE                   │
+└────────┬────────────────────────────────────────────┘
+         │
+         ▼  per-file pipeline (only when changed)
+┌─────────────────────────────────────────────────────┐
+│  EXTRACT          (PDF→text, image→bytes,           │
+│                   audio→whisper transcription)      │
+│      ↓                                              │
+│  CHUNK            (sliding window for prose,        │
+│                   one image = one chunk)            │
+│      ↓                                              │
+│  HASH             (sha256 dedup so identical        │
+│                   content isn't re-embedded)        │
+│      ↓                                              │
+│  ROUTE BY MODALITY                                  │
+│   • text  → text embedder (Ollama / OpenAI / ...)   │
+│   • image → vision embedder (Gemini / Qwen3-VL)     │
+│      ↓                                              │
+│  STORE            (sqlite-vec table per dim,        │
+│                   FTS5 for grep + filename)         │
+└────────┬────────────────────────────────────────────┘
+         │
+         ▼  query side
+┌─────────────────────────────────────────────────────┐
+│  ssearch "..."  ──► HYBRID SEARCH                   │
+│                     • semantic (vector cosine)      │
+│                     • grep (FTS5 BM25)              │
+│                     • filename (FTS5 BM25)          │
+│                     • cross-modal (text→vision)     │
+│                            ↓                        │
+│                     Reciprocal Rank Fusion          │
+│                     + per-file-type weights         │
+│                     + collapse-by-file              │
+│                            ↓                        │
+│                     ranked results                  │
+└─────────────────────────────────────────────────────┘
 ```
 
-Optional embedders:
+### In one paragraph
 
-```bash
-# Local text — Ollama
-brew install ollama && ollama serve &
-ollama pull embeddinggemma
+When you save a file in a watched folder, the kernel tells our watcher within milliseconds. We extract its text (or render it to an image, for vision-eligible content), break it into chunks, hash each chunk, and ask the configured embedder to turn it into a vector. The vector lands in a sqlite-vec table sized for that embedder's output dimension. The chunk text goes into an FTS5 index for word-level matching. When you search, we ask the embedder for the query's vector, look up the nearest chunks, ALSO run FTS5 grep + filename match in parallel, and fuse all four signals via reciprocal-rank fusion — weighted differently for code vs prose vs images. Results are collapsed so each file appears once with its best chunk.
 
-# Cloud vision — Gemini API key
-python -c "
-from semanticsd import keychain
-keychain.set_provider_key('gemini', 'YOUR_GEMINI_KEY')
-"
+### Why this architecture works
 
-# Local vision — Qwen3-VL via sentence-transformers (auto on first use, ~5GB)
-# No additional setup; just configure the preset in config.toml
-```
+- 🪶 **One DB**, not seven services. Backups are a single file copy.
+- 🔁 **Per-modality, per-dim vec tables** mean you can swap embedders without re-embedding everything — old vectors stay queryable for rollback.
+- 🧮 **Content hashing** means two notes that contain the same paragraph share one embedding. Free dedup.
+- ⚖️ **Rank-based fusion** (RRF) sidesteps the "your scores are on different scales" problem that breaks naive multi-signal search.
+- 🏷️ **File-type-aware weights** mean grep dominates for `.py` files and semantic dominates for `.md` — the right tool for the right kind of file.
 
-## Configure
-
-Daemon reads `~/Library/Application Support/semanticsd/config.toml`
-(override with `SEMANTICSD_HOME`). A working starter:
+### Things you can configure
 
 ```toml
+# ~/Library/Application Support/semanticsd/config.toml
+
 [watch]
-directories = ["/Users/me/Documents", "/Users/me/Code"]
-ignore_patterns = [".git", "node_modules", "*.min.js", "_astro"]
-max_file_size_mb = 25
+directories = ["/Users/me/Documents"]    # watched dirs
 
 [embedding.text]
-preset   = "ollama"
-model    = "embeddinggemma"
-base_url = "http://localhost:11434/v1"
+preset = "ollama"                          # or "openai", "gemini", "local", ...
 
-[embedding.vision]               # optional
-preset = "gemini"                 # or "qwen3_vl_local"
-model  = "gemini-embedding-2"
-
-[power]
-mode = "active"                  # active | saver
-auto_saver_on_battery = true     # flip to saver when unplugged
+[embedding.vision]                          # optional
+preset = "gemini"                          # or "qwen3_vl_local"
 
 [budget]
-monthly_limit_usd = 5.0          # 0 = unlimited
+monthly_limit_usd = 5.0                    # fail-closed when paid embedders cross cap
+
+[power]
+mode = "active"                            # or "saver" for periodic-only re-walks
+auto_saver_on_battery = true               # flip to saver when unplugged
 ```
 
-## Run
+---
 
-```bash
-# Foreground (great for trying it out)
-python -m semanticsd serve
+## 📖 More
 
-# Or install as a launchd agent (auto-start on login)
-python -m semanticsd install
-python -m semanticsd uninstall   # tear down
-```
+- 📘 [**USAGE.md**](USAGE.md) — install, configure, run, CLI commands, HTTP API reference
+- 🏛️ [**docs/superpowers/specs/**](docs/superpowers/specs/) — design specs for each plan (Foundation → Embedders → Pipeline → Multimodal → Search → Watcher → Cost & Reembed)
+- 📜 [**LICENSE**](LICENSE) — MIT
 
-## Use
+## 🚧 Status
 
-```bash
-# Search (CWD-scoped by default; --all for whole corpus)
-ssearch "neural network architecture"
-ssearch "supply chain ideas" --all
-ssearch "spooky action at a distance" --all
-ssearch "tshirt photo" --all              # cross-modal text → image
-
-# Search modes
-ssearch --semantic "..."     # vector only
-ssearch --filename "..."     # path FTS only
-ssearch --grep "..."         # chunk-text FTS only
-# default = hybrid (all of the above + cross-modal vision, RRF-fused)
-
-# Show repeated chunks of the same file (default collapses to one row per file)
-ssearch "transaction history" --all --chunks
-
-# Inspect daemon
-ssearch --status                 # health summary
-ssearch watch                    # watcher state
-ssearch power                    # active | saver
-ssearch usage                    # this month's spend by provider
-
-# Switch providers
-# 1. Edit [embedding.text] in config
-# 2. Restart daemon
-# 3. ssearch reembed text         # queue old chunks for re-embedding
-
-# Trigger a full re-walk (saver mode or manual)
-ssearch watch --sweep
-```
-
-## HTTP API
-
-Auto-generated OpenAPI docs at `http://127.0.0.1:47600/docs`.
-
-```
-GET  /v1/health           — status, embedders, budget block
-GET  /v1/search?q=...     — search (mode, limit, all, vision, collapse, cwd)
-POST /v1/index            — manual indexing trigger
-GET  /v1/watch            — watcher status
-POST /v1/watch/sweep      — force full re-walk
-GET  /v1/power            — current mode
-POST /v1/power            — {"mode": "active" | "saver"}
-GET  /v1/usage            — cost & volume report (since/until/provider filters)
-POST /v1/reembed          — {"modality": "text" | "vision" | "all"}
-GET  /v1/presets          — embedder providers available
-POST /v1/embedder/test    — round-trip an embedder preset
-```
-
-All endpoints require `X-Auth-Token: <token>`. Get yours via `python -m semanticsd token print`.
-
-## Architecture
-
-```
-semanticsd/
-├── cli.py                    # `semanticsd` (admin) + `ssearch` (client) entrypoints
-├── config.py                 # TOML loader + per-modality + budget + power
-├── keychain.py               # auth token + per-provider API keys via macOS Keychain
-├── paths.py, logging_setup.py
-│
-├── db/                       # sqlite-vec + migrations (V1..V4)
-├── embedders/                # one file per provider
-│   ├── base.py               # Embedder ABC (text)
-│   ├── vision_base.py        # VisionEmbedder ABC
-│   ├── local.py              # sentence-transformers (bge etc.)
-│   ├── ollama.py             # /v1 endpoint, no API key
-│   ├── openai.py             # OpenAI text-embedding-3-*
-│   ├── openai_compatible.py  # LM Studio, vLLM, TEI, OpenRouter, ...
-│   ├── gemini.py             # Gemini Embedding 2 (text)
-│   ├── gemini_vision.py      # Gemini Embedding 2 (vision/cross-modal)
-│   ├── qwen3_vl.py           # Qwen3-VL-Embedding-2B via MPS
-│   ├── registry.py           # PROVIDER_REGISTRY + factories
-│   └── router.py             # per-modality routing singleton
-│
-├── extractors/               # one file per file class
-│   ├── text.py html.py pdf.py docx.py xlsx.py pptx.py epub.py
-│   ├── rtf.py email_msg.py notebook.py image.py audio.py
-│
-├── pipeline/                 # walk → extract → chunk → hash → queue → embed
-│   ├── walker.py ignore.py chunker.py hasher.py
-│   ├── indexer.py            # also handles unindex_path for delete events
-│   └── worker.py             # routes by modality + writes usage rows + budget gate
-│
-├── search/                   # query side
-│   ├── semantic.py filename.py grep.py
-│   ├── fusion.py             # weighted RRF
-│   ├── profiles.py           # per-file-type weights (code/prose/data/image/...)
-│   ├── snippets.py
-│   └── engine.py             # composes everything, owns the LRU query cache
-│
-├── usage/                    # cost tracking
-│   ├── recorder.py budget.py reports.py
-│
-├── watcher/                  # FSEvents + power
-│   ├── events.py             # DirtyPathQueue (debounced, thread-safe)
-│   ├── fsevents_watcher.py   # watchdog wrapper
-│   ├── sweep.py              # initial + periodic
-│   ├── battery.py            # psutil AC/battery probe
-│   └── power.py              # PowerController state machine
-│
-├── server/                   # FastAPI + uvicorn
-│   ├── app.py auth.py
-│   └── routes/{health,presets,embedder_test,index,search,watch,power,usage,reembed}.py
-│
-├── admin/                    # launchd install/uninstall + plist
-└── reembed.py                # queue-jobs-for-stale-chunks helper
-```
-
-## Tests
-
-```bash
-make test                                 # 332 unit tests
-pytest -m slow                            # 56 e2e tests (need Ollama / Gemini)
-pytest tests/test_e2e_stress_battery.py   # 33-query ground-truth ranking
-```
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-## Status
-
-Personal project that grew over an intense build week. All behavior
-described above is shipped and verified end-to-end on a real-world
-`~/Documents` corpus. There's a deferred backlog — Raycast extension,
-MCP server, macOS Spotlight integration, cross-encoder reranker — in
-`docs/superpowers/specs/`. Issues & PRs welcome.
+Personal project. All described behavior is shipped and verified end-to-end on a real-world `~/Documents` corpus. Roadmap: web UI → Raycast extension → MCP server → cross-encoder reranker. PRs welcome.
