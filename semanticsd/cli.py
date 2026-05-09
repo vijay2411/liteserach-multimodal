@@ -85,6 +85,10 @@ def ssearch_root(
         "", "--test-embedder", metavar="PRESET",
         help="Round-trip test the embedder for the given preset.",
     ),
+    index_path: str = typer.Option(
+        "", "--index", metavar="PATH",
+        help="Index a file or directory; runs the worker once when done.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     if status:
@@ -153,7 +157,33 @@ def ssearch_root(
                 raise typer.Exit(4)
         return
 
+    if index_path:
+        try:
+            with _client() as c:
+                r = c.post(
+                    "/v1/index",
+                    json={"path": index_path, "drain": True},
+                    timeout=600.0,
+                )
+                r.raise_for_status()
+                body = r.json()
+        except httpx.HTTPError as e:
+            typer.echo(f"ERROR: cannot reach daemon: {e}", err=True)
+            raise typer.Exit(3)
+        if json_output:
+            typer.echo(json.dumps(body, indent=2))
+        else:
+            typer.echo(f"indexed:   {body.get('files_indexed', 0)} files")
+            typer.echo(f"chunks:    {body.get('chunks_created', 0)}")
+            typer.echo(f"queued:    {body.get('jobs_queued', 0)} jobs")
+            typer.echo(f"drained:   {body.get('drained', 0)} jobs in this run")
+            if body.get("files_skipped_unsupported"):
+                typer.echo(f"skipped:   {body['files_skipped_unsupported']} unsupported files")
+            if body.get("files_skipped_unchanged"):
+                typer.echo(f"unchanged: {body['files_skipped_unchanged']} files")
+        return
+
     if ctx.invoked_subcommand is None:
-        typer.echo("Usage: ssearch [QUERY] | --status | --presets | --test-embedder PRESET")
+        typer.echo("Usage: ssearch [QUERY] | --status | --presets | --test-embedder PRESET | --index PATH")
         typer.echo("Search subcommands land in Plan 5.")
         raise typer.Exit(0)
