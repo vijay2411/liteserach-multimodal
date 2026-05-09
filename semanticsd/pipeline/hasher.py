@@ -18,6 +18,11 @@ def sha256_hex(text: str) -> str:
     return hashlib.sha256(normalize_for_hash(text).encode("utf-8")).hexdigest()
 
 
+def sha256_bytes(data: bytes) -> str:
+    """SHA-256 hex of raw bytes (e.g. image data, no normalization)."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def find_existing_embedding(
     conn: sqlite3.Connection,
     content_hash: str,

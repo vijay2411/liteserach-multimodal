@@ -1,4 +1,4 @@
-from semanticsd.pipeline.hasher import sha256_hex, normalize_for_hash, find_existing_embedding
+from semanticsd.pipeline.hasher import sha256_hex, sha256_bytes, normalize_for_hash, find_existing_embedding
 from semanticsd.db import connection, migrations
 
 
@@ -8,6 +8,15 @@ def test_sha256_hex_is_deterministic():
 
 def test_sha256_hex_changes_with_content():
     assert sha256_hex("hello") != sha256_hex("world")
+
+
+def test_sha256_bytes_known_value():
+    assert sha256_bytes(b"abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_sha256_bytes_different_from_text_hash():
+    # raw bytes pathway must not normalize
+    assert sha256_bytes(b"Hello World") != sha256_hex("Hello World")
 
 
 def test_normalize_collapses_whitespace_and_lowercases():
