@@ -480,7 +480,18 @@ GET /docs              -- FastAPI Swagger UI
 GET /openapi.json      -- OpenAPI spec for client codegen
 ```
 
-### 11. CLI (`ssearch`)
+### 11. CLI (`ssearch`) — scope semantics
+
+**Default: cwd-scoped.** When the user runs `ssearch <query>` from a terminal, results are filtered to files under the current working directory (recursive). This matches the `ripgrep`/`grep` mental model that terminal users expect.
+
+- `ssearch <query>` → results under `$PWD`
+- `ssearch --all <query>` (alias `--global`) → search the full indexed corpus
+- `ssearch --path /some/dir <query>` → results under an explicit path
+- Daemon-side: indexing is global to the configured `[watch] directories`; cwd filtering is purely a CLI presentation filter applied to results.
+
+This split keeps the indexer simple (one corpus) while giving the CLI Unix-tool feel.
+
+
 
 Thin client over the HTTP API. The CLI's only job is to be a usable shell front-end and to prove the API contract is good enough that any future client is easy.
 
@@ -710,6 +721,8 @@ API keys live in Keychain, never in this file.
 ## Resolved Decisions
 
 - **Project name:** SemanticsD (capital D). Daemon binary / package: `semanticsd`. launchd label: `com.semanticsd`.
+- **Sandbox-first development:** a dedicated `sandbox/` subdir with test fixtures is shipped from Plan 2 onward. A `make dev-sandbox` target points the daemon at this folder for safe iteration before broadening the watch list. The default `["~/"]` watch directory is reserved for "graduation" — never used during active development.
+- **CLI scope default:** `ssearch <query>` is cwd-scoped (filters to files under `$PWD`). Use `--all`/`--global` to search the full indexed corpus, or `--path /dir` for an explicit scope. Indexer remains global; cwd filtering is a CLI presentation filter.
 - **Language:** Python 3.11+ + FastAPI. Rust deferred — clean migration path later if distribution becomes the bottleneck.
 - **Vector store:** `sqlite-vec`. Single file, no server, modern, embedded.
 - **Default embedder:** `LocalEmbedder` with `bge-small-en-v1.5`. Zero-config, offline, free.
