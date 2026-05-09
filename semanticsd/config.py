@@ -106,6 +106,17 @@ class IndexingConfig(BaseModel):
     worker_concurrency: int = 2
 
 
+class BudgetConfig(BaseModel):
+    """Spending caps for paid embedder providers.
+
+    monthly_limit_usd = 0 means unlimited (no fail-closed gate).
+    warning_threshold is the fraction (0..1) of the cap at which we
+    log a one-time warning per process.
+    """
+    monthly_limit_usd: float = 0.0
+    warning_threshold: float = 0.8
+
+
 class Config(BaseModel):
     watch: WatchConfig = Field(default_factory=WatchConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
@@ -114,6 +125,7 @@ class Config(BaseModel):
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     power: PowerConfig = Field(default_factory=PowerConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
 
 def load(path: Path | None = None) -> Config:
@@ -179,6 +191,11 @@ auto_saver_on_battery = true
 [indexing]
 max_attempts = 5
 worker_concurrency = 2
+
+[budget]
+# 0 = unlimited; set e.g. 5.0 to cap monthly spend at $5 across paid providers.
+monthly_limit_usd = 0.0
+warning_threshold = 0.8
 """
 
 
