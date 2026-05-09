@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semanticsd"
+version = "0.1.0"
+description = "SemanticsD — local semantic search daemon for macOS"
+requires-python = ">=3.11"
+authors = [{ name = "Vedant Vijay" }]
+readme = "README.md"
+
+[project.scripts]
+semanticsd = "semanticsd.cli:semanticsd_app"
+ssearch = "semanticsd.cli:ssearch_app"
+
+[tool.setuptools.packages.find]
+include = ["semanticsd*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
