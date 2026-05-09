@@ -1,6 +1,11 @@
-"""Schema DDL. Plan 1 subset — no vector tables yet (those land in Plan 2)."""
+"""Schema DDL.
 
-SCHEMA_VERSION = 1
+Plan 1 created the relational tables. Plan 2 adds vec_embeddings (sqlite-vec
+virtual table) at dim=384 to match the default LocalEmbedder
+(BAAI/bge-small-en-v1.5).
+"""
+
+SCHEMA_VERSION = 2
 
 DDL_V1 = [
     """
@@ -78,6 +83,14 @@ DDL_V1 = [
     CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+    )
+    """,
+]
+
+DDL_V2 = [
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
+        embedding FLOAT[384]
     )
     """,
 ]

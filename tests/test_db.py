@@ -45,3 +45,38 @@ def test_wal_mode_enabled(tmp_path):
     conn = connection.get_connection(db)
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
     assert mode == "wal"
+
+
+def test_vec_embeddings_table_exists(tmp_path):
+    db = tmp_path / "test.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+    cur = conn.execute("SELECT name FROM sqlite_master WHERE name='vec_embeddings'")
+    assert cur.fetchone() is not None
+
+
+def test_vec_embeddings_round_trip(tmp_path):
+    """Insert a 384-dim vector, query it back."""
+    import struct
+    db = tmp_path / "test.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+    vec = [0.1] * 384
+    blob = struct.pack(f"{len(vec)}f", *vec)
+    conn.execute("INSERT INTO vec_embeddings(rowid, embedding) VALUES (1, ?)", (blob,))
+    row = conn.execute(
+        "SELECT rowid, distance FROM vec_embeddings WHERE embedding MATCH ? ORDER BY distance LIMIT 1",
+        (blob,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 1
+    # distance to self ~ 0
+    assert row[1] < 1e-3
+
+
+def test_schema_version_is_2(tmp_path):
+    db = tmp_path / "test.db"
+    conn = connection.get_connection(db)
+    migrations.apply(conn)
+    v = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    assert int(v[0]) == 2
