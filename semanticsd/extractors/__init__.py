@@ -5,3 +5,4 @@ from semanticsd.extractors import pdf  # noqa: F401
 from semanticsd.extractors import docx  # noqa: F401
 from semanticsd.extractors import xlsx  # noqa: F401
 from semanticsd.extractors import pptx  # noqa: F401
+from semanticsd.extractors import epub  # noqa: F401
