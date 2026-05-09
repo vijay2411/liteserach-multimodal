@@ -1,4 +1,4 @@
-"""Health endpoint."""
+"""Health endpoint — surfaces both text and vision embedders."""
 from __future__ import annotations
 from fastapi import APIRouter, Depends
 from semanticsd import __version__
@@ -8,6 +8,22 @@ from semanticsd import paths
 from semanticsd import embedders as emb_pkg
 
 router = APIRouter()
+
+
+def _embedder_section(em, kind_label: str) -> dict:
+    if em is None:
+        return {"ok": False, "message": f"{kind_label} embedder not configured"}
+    try:
+        ok, msg = em.health_check()
+    except Exception as e:
+        return {"ok": False, "message": f"{kind_label} health_check raised: {e}"}
+    return {
+        "ok": ok,
+        "message": msg,
+        "provider_id": em.provider_id,
+        "model_id": em.model_id,
+        "dim": em.dim,
+    }
 
 
 @router.get("/health", dependencies=[Depends(require_token)])
@@ -21,30 +37,32 @@ def health() -> dict:
     except Exception:
         db_ok = False
 
-    embedder_section: dict
     try:
-        embedder = emb_pkg.get_active_embedder()
+        router_obj = emb_pkg.get_router()
+        text_em = router_obj.text
+        vision_em = router_obj.vision
     except Exception as e:
-        embedder = None
-        embedder_section = {"ok": False, "message": f"embedder build failed: {e}"}
-    else:
-        if embedder is None:
-            embedder_section = {"ok": False, "message": "embedder not configured"}
-        else:
-            ok, msg = embedder.health_check()
-            embedder_section = {
-                "ok": ok,
-                "message": msg,
-                "provider_id": embedder.provider_id,
-                "model_id": embedder.model_id,
-                "dim": embedder.dim,
-            }
+        text_em = None
+        vision_em = None
 
-    overall_ok = db_ok and embedder_section["ok"]
+    text_section = _embedder_section(text_em, "text")
+    # Vision is optional — if not configured, report a benign "disabled" status
+    # rather than degraded; only mark degraded when configured-but-broken.
+    if vision_em is None:
+        vision_section = {"ok": True, "message": "vision disabled (not configured)"}
+    else:
+        vision_section = _embedder_section(vision_em, "vision")
+
+    overall_ok = db_ok and text_section["ok"] and vision_section["ok"]
     return {
         "status": "ok" if overall_ok else "degraded",
         "version": __version__,
         "doc_count": doc_count,
         "vector_store": {"ok": db_ok},
-        "embedder": embedder_section,
+        "embedders": {
+            "text": text_section,
+            "vision": vision_section,
+        },
+        # Back-compat: keep "embedder" pointing at text for older clients.
+        "embedder": text_section,
     }

@@ -74,9 +74,10 @@ def test_vec_embeddings_round_trip(tmp_path):
     assert row[1] < 1e-3
 
 
-def test_schema_version_is_2(tmp_path):
+def test_schema_version_is_current(tmp_path):
     db = tmp_path / "test.db"
     conn = connection.get_connection(db)
     migrations.apply(conn)
     v = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-    assert int(v[0]) == 2
+    from semanticsd.db.schema import SCHEMA_VERSION
+    assert int(v[0]) == SCHEMA_VERSION

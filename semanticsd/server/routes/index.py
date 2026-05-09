@@ -38,10 +38,15 @@ def index(req: IndexRequest) -> dict[str, Any]:
 
     drained = 0
     if req.drain:
-        emb = emb_pkg.get_active_embedder()
-        if emb is None:
-            raise HTTPException(status_code=503, detail="no embedder configured")
-        worker = Worker(conn=conn, embedder=emb)
-        drained = worker.drain_once()
+        router_obj = emb_pkg.get_router()
+        if router_obj.text is None:
+            raise HTTPException(status_code=503, detail="no text embedder configured")
+        worker = Worker(conn=conn, router=router_obj)
+        worker.reset_stale()
+        while True:
+            n = worker.drain_once()
+            drained += n
+            if n == 0:
+                break
 
     return {**stats, "drained": drained}

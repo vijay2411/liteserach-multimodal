@@ -8,13 +8,13 @@ from tests._fixtures import make_text
 class FakeEmb:
     provider_id = "fake"
     model_id = "fake-1"
-    dim = 384
+    dim = 768
     supports_kind = False
     cost_per_million_input_tokens_usd = 0.0
 
     def embed(self, texts, kind):
         from semanticsd.embedders.base import EmbedResult
-        return EmbedResult(vectors=[[0.1] * 384 for _ in texts], input_tokens=1)
+        return EmbedResult(vectors=[[0.1] * 768 for _ in texts], input_tokens=1)
 
     def health_check(self):
         return (True, "fake ok")
@@ -23,9 +23,23 @@ class FakeEmb:
         return 1
 
 
+class FakeRouter:
+    def __init__(self, text=None, vision=None):
+        self.text = text
+        self.vision = vision
+
+    def get(self, modality):
+        if modality == "text":
+            return self.text
+        if modality == "vision":
+            return self.vision
+        return None
+
+
 @pytest.fixture
 def fake_active(monkeypatch):
     import semanticsd.embedders as emb_pkg
+    monkeypatch.setattr(emb_pkg, "get_router", lambda **kw: FakeRouter(text=FakeEmb()))
     monkeypatch.setattr(emb_pkg, "get_active_embedder", lambda **kw: FakeEmb())
 
 
