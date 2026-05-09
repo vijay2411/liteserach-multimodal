@@ -93,6 +93,140 @@ def token_print():
     typer.echo(admin_install.print_token())
 
 
+# ---- semanticsd lifecycle (start / stop / restart / status / logs / doctor) ----
+
+@semanticsd_app.command()
+def start():
+    """Start the launchd-managed daemon (after `install`). Idempotent."""
+    res = admin_install.start()
+    if res["ok"]:
+        typer.echo("✓ daemon started")
+    else:
+        typer.echo(f"✗ launchctl bootstrap failed: {res['stderr']}", err=True)
+        raise typer.Exit(1)
+
+
+@semanticsd_app.command()
+def stop():
+    """Stop the launchd-managed daemon. Idempotent."""
+    res = admin_install.stop()
+    if res["ok"]:
+        typer.echo("✓ daemon stopped")
+    else:
+        # bootout returns non-zero if already stopped — treat as success-ish
+        typer.echo(f"daemon not loaded (or already stopped)")
+
+
+@semanticsd_app.command()
+def restart():
+    """Restart the launchd-managed daemon (kickstart -k)."""
+    res = admin_install.restart()
+    if res["ok"]:
+        typer.echo("✓ daemon restarted")
+    else:
+        typer.echo(f"✗ kickstart failed: {res['stderr']}", err=True)
+        raise typer.Exit(1)
+
+
+@semanticsd_app.command()
+def status():
+    """Show whether the daemon is loaded + running."""
+    s = admin_install.daemon_status()
+    if not s["loaded"]:
+        typer.echo("not loaded — run `semanticsd install` then `semanticsd start`")
+        raise typer.Exit(2)
+    if s["running"]:
+        typer.echo(f"✓ running  (pid {s['pid']})")
+    else:
+        typer.echo("✗ loaded but not running")
+        raise typer.Exit(1)
+
+
+@semanticsd_app.command()
+def logs(
+    follow: bool = typer.Option(False, "-f", "--follow", help="tail -f the log"),
+    lines: int = typer.Option(50, "-n", "--lines", help="number of lines from the end"),
+):
+    """Show the daemon log file."""
+    import subprocess
+    p = admin_install.log_path()
+    if not p.exists():
+        typer.echo(f"no log file at {p}", err=True)
+        raise typer.Exit(2)
+    cmd = ["tail"]
+    if follow: cmd.append("-f")
+    cmd += ["-n", str(lines), str(p)]
+    try:
+        subprocess.call(cmd)
+    except KeyboardInterrupt:
+        pass
+
+
+@semanticsd_app.command()
+def doctor():
+    """Run preflight checks: Python build, sqlite-vec, Ollama, optional vendors."""
+    import importlib, socket as _s
+    fails = 0
+    def chk(label, ok, detail=""):
+        nonlocal fails
+        mark = "✓" if ok else "✗"
+        if not ok: fails += 1
+        line = f"  {mark} {label}"
+        if detail: line += f"  ({detail})"
+        typer.echo(line)
+
+    typer.echo("Python")
+    import sys as _sys
+    chk(f"Python {_sys.version_info.major}.{_sys.version_info.minor}",
+        _sys.version_info >= (3, 11),
+        "needs >= 3.11")
+    try:
+        import sqlite3 as _s3
+        c = _s3.connect(":memory:"); c.enable_load_extension(True); c.close()
+        chk("sqlite3.enable_load_extension", True)
+    except Exception as e:
+        chk("sqlite3.enable_load_extension", False, str(e))
+
+    typer.echo("\nDependencies")
+    for mod in ["sqlite_vec", "fastapi", "watchdog", "psutil", "openai", "pypdf",
+                "pypdfium2", "pytesseract", "faster_whisper", "sentence_transformers",
+                "keyring", "pathspec"]:
+        try:
+            importlib.import_module(mod)
+            chk(mod, True)
+        except ImportError as e:
+            chk(mod, False, str(e))
+
+    typer.echo("\nServices")
+    sock = _s.socket()
+    try:
+        sock.settimeout(0.5); sock.connect(("localhost", 11434)); ollama_up = True
+    except OSError:
+        ollama_up = False
+    finally:
+        sock.close()
+    chk("Ollama at localhost:11434", ollama_up, "optional, for local text embeddings")
+
+    typer.echo("\nKeychain")
+    tok = keychain.get_auth_token()
+    chk("auth token present", bool(tok), "run `semanticsd install`" if not tok else "")
+    for prov in ["openai", "gemini"]:
+        v = keychain.get_provider_key(prov)
+        chk(f"provider key: {prov}", v is not None,
+            "" if v else "optional, only if you use this provider")
+
+    typer.echo("\nDaemon")
+    s = admin_install.daemon_status()
+    chk("launchd agent loaded", s["loaded"])
+    chk("daemon running", bool(s.get("running")), f"pid {s.get('pid')}" if s.get("running") else "")
+
+    typer.echo("")
+    if fails:
+        typer.echo(f"{fails} check(s) failed")
+        raise typer.Exit(1)
+    typer.echo("all checks passed")
+
+
 # ---- ssearch client ----
 
 def _client() -> httpx.Client:
@@ -550,3 +684,25 @@ def reembed_text():
 def reembed_vision():
     """Queue vision re-embed jobs only."""
     _reembed_call("vision")
+
+
+# ---- ssearch ui / ssearch dashboard ----
+
+@ssearch_app.command("ui")
+def ssearch_ui():
+    """Open the search UI in your default browser."""
+    cfg = config.load()
+    url = f"http://{cfg.daemon.http_host}:{cfg.daemon.http_port}/"
+    import webbrowser
+    typer.echo(f"opening {url}")
+    webbrowser.open(url)
+
+
+@ssearch_app.command("dashboard")
+def ssearch_dashboard():
+    """Open the monitoring dashboard in your default browser."""
+    cfg = config.load()
+    url = f"http://{cfg.daemon.http_host}:{cfg.daemon.http_port}/dashboard"
+    import webbrowser
+    typer.echo(f"opening {url}")
+    webbrowser.open(url)

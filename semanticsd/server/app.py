@@ -12,6 +12,7 @@ from semanticsd.server.routes import (
     usage as usage_route,
     reembed as reembed_route,
     image as image_route,
+    stats as stats_route,
 )
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -47,14 +48,20 @@ def create_app(power_controller=None) -> FastAPI:
     app.include_router(usage_route.router, prefix="/v1")
     app.include_router(reembed_route.router, prefix="/v1")
     app.include_router(image_route.router, prefix="/v1")
+    app.include_router(stats_route.router, prefix="/v1")
 
     # Serve the bundled web UI at /. The single-page app uses the same /v1
     # endpoints over fetch(); auth token is collected once via a setup modal
     # and stashed in localStorage. No build step or external assets.
     index_html = _STATIC_DIR / "index.html"
+    dashboard_html = _STATIC_DIR / "dashboard.html"
     if index_html.exists():
         @app.get("/", include_in_schema=False)
         def _ui_root():
             return FileResponse(index_html)
+    if dashboard_html.exists():
+        @app.get("/dashboard", include_in_schema=False)
+        def _ui_dashboard():
+            return FileResponse(dashboard_html)
 
     return app

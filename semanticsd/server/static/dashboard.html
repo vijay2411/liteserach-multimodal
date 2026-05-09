@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SemanticsD — Dashboard</title>
+<style>
+:root {
+  --bg: #fafafa; --bg-card: #ffffff; --bg-hover: #f4f4f5;
+  --border: #e4e4e7; --border-strong: #d4d4d8;
+  --text: #18181b; --text-dim: #71717a; --text-muted: #a1a1aa;
+  --accent: #2563eb; --accent-soft: #dbeafe;
+  --green: #10b981; --amber: #f59e0b; --red: #ef4444;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 1px 3px rgba(0,0,0,.06);
+  --radius: 10px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b; --bg-card: #18181b; --bg-hover: #27272a;
+    --border: #27272a; --border-strong: #3f3f46;
+    --text: #fafafa; --text-dim: #a1a1aa; --text-muted: #71717a;
+    --accent: #60a5fa; --accent-soft: #1e3a8a;
+    --green: #34d399; --amber: #fbbf24; --red: #f87171;
+    --shadow: 0 1px 2px rgba(0,0,0,.3);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  font-size: 13px; line-height: 1.5;
+  background: var(--bg); color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+header {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--bg-card); border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+}
+.header-inner {
+  max-width: 1200px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px;
+}
+.header-inner h1 {
+  margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+}
+.header-inner .crumb {
+  font-size: 12px; color: var(--text-dim);
+}
+.header-inner .spacer { flex: 1; }
+.header-inner a, .header-inner button {
+  font-size: 12px; padding: 4px 10px; background: transparent;
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; text-decoration: none;
+}
+.header-inner a:hover, .header-inner button:hover {
+  background: var(--bg-hover); color: var(--text);
+}
+.dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green); margin-right: 6px;
+}
+.dot.bad { background: var(--red); }
+.dot.warn { background: var(--amber); }
+
+main {
+  max-width: 1200px; margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+.card-wide { grid-column: 1 / -1; }
+.card-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.card-header .icon { font-size: 14px; }
+.card-header .pill {
+  margin-left: auto;
+  padding: 1px 8px; border-radius: 99px;
+  background: var(--bg-hover); color: var(--text-dim);
+  font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.04em; font-weight: 500;
+}
+.card-header .pill.green { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+.card-header .pill.amber { background: rgba(245, 158, 11, 0.15); color: var(--amber); }
+.card-header .pill.red { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-family: var(--mono); font-size: 12px; }
+.kv .k { color: var(--text-dim); }
+.kv .v { text-align: right; color: var(--text); }
+.kv .v.dim { color: var(--text-muted); }
+
+.big-num {
+  font-size: 32px; font-weight: 600; letter-spacing: -0.02em;
+  color: var(--text); margin: 4px 0; font-feature-settings: "tnum";
+}
+.big-num .unit { font-size: 13px; font-weight: 400; color: var(--text-dim); margin-left: 4px; }
+
+.bar-row {
+  display: grid; grid-template-columns: 90px 1fr 50px;
+  gap: 10px; align-items: center;
+  font-family: var(--mono); font-size: 11px;
+  margin-bottom: 4px;
+}
+.bar-row .k { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .v { text-align: right; color: var(--text); }
+.bar-track {
+  height: 6px; background: var(--bg-hover); border-radius: 3px; overflow: hidden;
+}
+.bar-fill {
+  height: 100%; background: var(--accent); border-radius: 3px;
+  transition: width 0.3s;
+}
+.bar-fill.green { background: var(--green); }
+.bar-fill.amber { background: var(--amber); }
+.bar-fill.red { background: var(--red); }
+
+.budget-meter {
+  width: 100%; height: 8px; background: var(--bg-hover);
+  border-radius: 4px; overflow: hidden; margin: 8px 0;
+}
+.budget-fill {
+  height: 100%; background: var(--green);
+  transition: width 0.3s, background 0.3s;
+}
+.budget-fill.warn { background: var(--amber); }
+.budget-fill.bad { background: var(--red); }
+
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+th, td { text-align: left; padding: 6px 8px; }
+th { color: var(--text-muted); font-weight: 500; text-transform: uppercase;
+     font-size: 10px; letter-spacing: 0.04em;
+     border-bottom: 1px solid var(--border); }
+td { color: var(--text); }
+tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+.num { text-align: right; font-feature-settings: "tnum"; }
+
+.empty { color: var(--text-muted); font-size: 12px; padding: 20px 0; text-align: center; }
+.refresh-pulse {
+  font-size: 10px; color: var(--text-muted); font-family: var(--mono);
+}
+
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; backdrop-filter: blur(4px);
+}
+.modal {
+  background: var(--bg-card); border-radius: var(--radius); padding: 24px;
+  width: 90%; max-width: 460px; box-shadow: var(--shadow);
+}
+.modal h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.modal p { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; }
+.modal code {
+  background: var(--bg-hover); padding: 2px 6px; border-radius: 4px;
+  font-family: var(--mono); font-size: 11px;
+}
+.modal input {
+  width: 100%; font-family: var(--mono); font-size: 12px;
+  padding: 9px 12px; border: 1px solid var(--border-strong);
+  border-radius: 6px; background: var(--bg); color: var(--text);
+  outline: none; margin-bottom: 12px;
+}
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal button {
+  padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-family: inherit;
+  font-size: 13px; cursor: pointer;
+}
+.modal button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <span style="font-size:18px">📊</span>
+    <h1>SemanticsD</h1>
+    <span class="crumb">/ dashboard</span>
+    <div class="spacer"></div>
+    <a href="/">← search</a>
+    <button id="btn-pause">⏸ pause</button>
+    <button id="btn-reset-token">⚙️ token</button>
+    <span class="refresh-pulse" id="refresh-pulse">refreshing every 3s</span>
+  </div>
+</header>
+
+<main id="grid"></main>
+
+<div class="overlay" id="setup" style="display:none">
+  <div class="modal">
+    <h2>🔑 Connect to SemanticsD</h2>
+    <p>Paste your auth token to continue. Get it with:</p>
+    <p><code>python -m semanticsd token print</code></p>
+    <input id="token-input" type="password" placeholder="paste token here" />
+    <div class="modal-actions">
+      <button class="primary" id="btn-save-token">save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const TOKEN_KEY = "semanticsd_token";
+let token = localStorage.getItem(TOKEN_KEY);
+let paused = false;
+let pollTimer = null;
+
+function showSetup() { $("setup").style.display = "flex"; $("token-input").focus(); }
+function hideSetup() { $("setup").style.display = "none"; }
+function saveToken() {
+  const v = $("token-input").value.trim();
+  if (!v) return;
+  token = v;
+  localStorage.setItem(TOKEN_KEY, v);
+  hideSetup();
+  refresh();
+  startPolling();
+}
+function resetToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  token = null;
+  showSetup();
+}
+$("token-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveToken(); });
+$("btn-save-token").addEventListener("click", saveToken);
+$("btn-reset-token").addEventListener("click", resetToken);
+$("btn-pause").addEventListener("click", () => {
+  paused = !paused;
+  $("btn-pause").textContent = paused ? "▶ resume" : "⏸ pause";
+  $("refresh-pulse").textContent = paused ? "paused" : "refreshing every 3s";
+  if (paused && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  else startPolling();
+});
+
+async function api(path) {
+  if (!token) throw new Error("no token");
+  const r = await fetch(path, { headers: { "X-Auth-Token": token } });
+  if (r.status === 401) { resetToken(); throw new Error("auth failed"); }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function el(tag, props = {}, ...children) {
+  const e = document.createElement(tag);
+  Object.entries(props).forEach(([k, v]) => {
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  });
+  for (const c of children) {
+    if (c == null) continue;
+    if (typeof c === "string" || typeof c === "number") e.appendChild(document.createTextNode(String(c)));
+    else e.appendChild(c);
+  }
+  return e;
+}
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B","KB","MB","GB","TB"];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(n >= 100 || i === 0 ? 0 : 1) + " " + u[i];
+}
+function fmtAge(unix) {
+  if (!unix) return "—";
+  const d = Math.floor(Math.floor(Date.now() / 1000) - unix);
+  if (d < 0) return "in the future";
+  if (d < 60) return d + "s ago";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+function fmtUSD(n) {
+  if (n == null) return "—";
+  return "$" + n.toFixed(n < 0.01 ? 4 : 2);
+}
+
+// ─── Render cards ─────────────────────────────────────
+function renderHealth(h) {
+  const c = el("div", { class: "card" });
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "❤️" }),
+    "Health",
+    el("span", { class: "pill " + (h.status === "ok" ? "green" : "red"), text: h.status })
+  ));
+  const t = h.embedders?.text;
+  const v = h.embedders?.vision;
+  c.appendChild(el("div", { class: "kv" },
+    el("div", { class: "k", text: "version" }),
+    el("div", { class: "v dim", text: h.version || "—" }),
+    el("div", { class: "k", text: "documents" }),
+    el("div", { class: "v", text: String(h.doc_count || 0) }),
+    el("div", { class: "k", text: "vector store" }),
+    el("div", { class: "v", text: h.vector_store?.ok ? "ok" : "broken" }),
+    el("div", { class: "k", text: "text embedder" }),
+    el("div", { class: "v dim", text: t ? `${t.provider_id}/${t.model_id} ${t.dim}d` : "—" }),
+    el("div", { class: "k", text: "vision embedder" }),
+    el("div", { class: "v dim", text: v && v.dim ? `${v.provider_id}/${v.model_id} ${v.dim}d` : "disabled" })
+  ));
+  return c;
+}
+
+function renderWatcher(w) {
+  const c = el("div", { class: "card" });
+  const status = w.mode === "active" && w.watcher_running ? "live" :
+                 w.mode === "saver" ? "saver" : "idle";
+  const pillClass = w.mode === "active" && w.watcher_running ? "green" :
+                    w.mode === "saver" ? "amber" : "red";
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "👁" }), "Watcher",
+    el("span", { class: "pill " + pillClass, text: status })
+  ));
+  c.appendChild(el("div", { class: "kv" },
+    el("div", { class: "k", text: "mode" }),
+    el("div", { class: "v", text: w.mode || "—" }),
+    el("div", { class: "k", text: "watching" }),
+    el("div", { class: "v", text: (w.directories?.length || 0) + " dir(s)" }),
+    el("div", { class: "k", text: "dirty queue" }),
+    el("div", { class: "v", text: String(w.dirty_pending || 0) }),
+    el("div", { class: "k", text: "last sweep" }),
+    el("div", { class: "v dim", text: fmtAge(w.last_sweep_at) }),
+    el("div", { class: "k", text: "saver interval" }),
+    el("div", { class: "v dim", text: w.saver_interval_s ? `${w.saver_interval_s}s` : "—" }),
+    el("div", { class: "k", text: "power source" }),
+    el("div", { class: "v dim", text: w.power_source || "—" })
+  ));
+  return c;
+}
+
+function renderJobs(stats) {
+  const c = el("div", { class: "card" });
+  const j = stats.jobs_by_status || {};
+  const total = (j.done || 0) + (j.pending || 0) + (j.in_flight || 0) + (j.failed || 0);
+  const flowing = (j.pending || 0) > 0 || (j.in_flight || 0) > 0;
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "⚙️" }), "Job queue",
+    el("span", { class: "pill " + (flowing ? "amber" : "green"),
+                 text: flowing ? "active" : "idle" })
+  ));
+  c.appendChild(el("div", { class: "kv" },
+    el("div", { class: "k", text: "done" }),
+    el("div", { class: "v", text: String(j.done || 0) }),
+    el("div", { class: "k", text: "in flight" }),
+    el("div", { class: "v", text: String(j.in_flight || 0) }),
+    el("div", { class: "k", text: "pending" }),
+    el("div", { class: "v", text: String(j.pending || 0) }),
+    el("div", { class: "k", text: "failed" }),
+    el("div", { class: "v" + ((j.failed || 0) > 0 ? "" : " dim"),
+                text: String(j.failed || 0) }),
+    el("div", { class: "k", text: "total" }),
+    el("div", { class: "v dim", text: String(total) })
+  ));
+  return c;
+}
+
+function renderCorpus(stats) {
+  const c = el("div", { class: "card" });
+  const cm = stats.chunks_by_modality || {};
+  const totalChunks = (cm.text || 0) + (cm.vision || 0);
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "📚" }), "Corpus"
+  ));
+  const num = el("div", { class: "big-num" });
+  num.append(String(stats.files_total || 0));
+  num.appendChild(el("span", { class: "unit", text: "files" }));
+  c.appendChild(num);
+  c.appendChild(el("div", { class: "kv" },
+    el("div", { class: "k", text: "text chunks" }),
+    el("div", { class: "v", text: String(cm.text || 0) }),
+    el("div", { class: "k", text: "vision chunks" }),
+    el("div", { class: "v", text: String(cm.vision || 0) }),
+    el("div", { class: "k", text: "total chunks" }),
+    el("div", { class: "v dim", text: String(totalChunks) }),
+    el("div", { class: "k", text: "DB size" }),
+    el("div", { class: "v dim", text: fmtBytes(stats.db_size_bytes) })
+  ));
+  return c;
+}
+
+function renderBudget(h) {
+  const c = el("div", { class: "card" });
+  const b = h.budget || {};
+  const limit = b.limit_usd || 0;
+  const spent = b.spent_this_month_usd || 0;
+  const pct = b.percent_used || 0;
+  const pillClass = b.blocked ? "red" : (pct >= 0.8 ? "amber" : "green");
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "💰" }), "This month",
+    limit > 0 ? el("span", { class: "pill " + pillClass,
+                              text: (pct * 100).toFixed(0) + "%" }) : null
+  ));
+  const num = el("div", { class: "big-num" });
+  num.append(fmtUSD(spent));
+  if (limit > 0) num.appendChild(el("span", { class: "unit", text: "of " + fmtUSD(limit) }));
+  c.appendChild(num);
+  if (limit > 0) {
+    const meter = el("div", { class: "budget-meter" });
+    const fillClass = b.blocked ? "bad" : (pct >= 0.8 ? "warn" : "");
+    const fill = el("div", { class: "budget-fill " + fillClass });
+    fill.style.width = Math.min(100, pct * 100) + "%";
+    meter.appendChild(fill);
+    c.appendChild(meter);
+  } else {
+    c.appendChild(el("div", { class: "kv" },
+      el("div", { class: "k", text: "budget cap" }),
+      el("div", { class: "v dim", text: "unlimited" })
+    ));
+  }
+  return c;
+}
+
+function renderProviders(stats) {
+  const c = el("div", { class: "card" });
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "🤖" }), "Embedder providers"
+  ));
+  const ps = stats.providers || [];
+  if (ps.length === 0) {
+    c.appendChild(el("div", { class: "empty", text: "no chunks embedded yet" }));
+    return c;
+  }
+  const tbl = el("table");
+  tbl.appendChild(el("thead", {}, el("tr", {},
+    el("th", { text: "provider/model" }),
+    el("th", { text: "modality" }),
+    el("th", { class: "num", text: "dim" }),
+    el("th", { class: "num", text: "chunks" })
+  )));
+  const tb = el("tbody");
+  for (const p of ps.slice(0, 8)) {
+    tb.appendChild(el("tr", {},
+      el("td", { text: `${p.provider_id}/${p.model_id}` }),
+      el("td", { text: p.modality }),
+      el("td", { class: "num", text: String(p.dim) }),
+      el("td", { class: "num", text: String(p.chunks) })
+    ));
+  }
+  tbl.appendChild(tb);
+  c.appendChild(tbl);
+  return c;
+}
+
+function renderUsage(usage) {
+  const c = el("div", { class: "card" });
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "📊" }), "Usage (this month)"
+  ));
+  const rows = usage.by_provider || [];
+  if (rows.length === 0) {
+    c.appendChild(el("div", { class: "empty", text: "no embedder calls yet" }));
+    return c;
+  }
+  const tbl = el("table");
+  tbl.appendChild(el("thead", {}, el("tr", {},
+    el("th", { text: "provider/model" }),
+    el("th", { text: "op" }),
+    el("th", { class: "num", text: "calls" }),
+    el("th", { class: "num", text: "tokens" }),
+    el("th", { class: "num", text: "cost" })
+  )));
+  const tb = el("tbody");
+  for (const r of rows.slice(0, 6)) {
+    tb.appendChild(el("tr", {},
+      el("td", { text: `${r.provider_id}/${r.model_id}` }),
+      el("td", { text: r.operation.replace("_embed", "") }),
+      el("td", { class: "num", text: String(r.calls) }),
+      el("td", { class: "num", text: r.input_tokens.toLocaleString() }),
+      el("td", { class: "num", text: fmtUSD(r.cost_usd) })
+    ));
+  }
+  tbl.appendChild(tb);
+  c.appendChild(tbl);
+  return c;
+}
+
+function renderFileTypes(stats) {
+  const c = el("div", { class: "card card-wide" });
+  c.appendChild(el("div", { class: "card-header" },
+    el("span", { class: "icon", text: "📁" }), "Files by type"
+  ));
+  const types = stats.file_types || [];
+  if (types.length === 0) {
+    c.appendChild(el("div", { class: "empty", text: "no files indexed yet" }));
+    return c;
+  }
+  const max = Math.max(...types.map(t => t.count));
+  const wrap = el("div");
+  for (const t of types) {
+    const pct = max > 0 ? (t.count / max) : 0;
+    const row = el("div", { class: "bar-row" },
+      el("span", { class: "k", text: t.file_type }),
+      (() => {
+        const tr = el("div", { class: "bar-track" });
+        const f = el("div", { class: "bar-fill" });
+        f.style.width = (pct * 100) + "%";
+        tr.appendChild(f);
+        return tr;
+      })(),
+      el("span", { class: "v", text: String(t.count) })
+    );
+    wrap.appendChild(row);
+  }
+  c.appendChild(wrap);
+  return c;
+}
+
+// ─── Refresh ───────────────────────────────────────────
+async function refresh() {
+  if (!token) return;
+  try {
+    const [h, w, stats, usage] = await Promise.all([
+      api("/v1/health"),
+      api("/v1/watch").catch(() => ({})),
+      api("/v1/stats").catch(() => ({})),
+      api("/v1/usage").catch(() => ({})),
+    ]);
+    const grid = $("grid");
+    grid.replaceChildren();
+    grid.appendChild(renderHealth(h));
+    if (w.mode) grid.appendChild(renderWatcher(w));
+    grid.appendChild(renderCorpus(stats));
+    grid.appendChild(renderJobs(stats));
+    grid.appendChild(renderBudget(h));
+    grid.appendChild(renderUsage(usage));
+    grid.appendChild(renderProviders(stats));
+    grid.appendChild(renderFileTypes(stats));
+  } catch (e) {
+    const grid = $("grid");
+    grid.replaceChildren();
+    const card = el("div", { class: "card card-wide" });
+    card.appendChild(el("div", { class: "card-header" },
+      el("span", { class: "icon", text: "⚠️" }), "Error"));
+    card.appendChild(el("div", { class: "empty", text: e.message }));
+    grid.appendChild(card);
+  }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  if (paused) return;
+  pollTimer = setInterval(refresh, 3000);
+}
+
+// ─── Boot ──────────────────────────────────────────────
+if (!token) showSetup();
+else { refresh(); startPolling(); }
+</script>
+</body>
+</html>

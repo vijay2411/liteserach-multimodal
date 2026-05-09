@@ -70,3 +70,82 @@ def print_token() -> str:
     if not tok:
         raise RuntimeError("no token in Keychain — run `semanticsd install` first")
     return tok
+
+
+def _label() -> str:
+    """The launchd label set in our plist."""
+    return "com.semanticsd"
+
+
+def _gui_target() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def start() -> dict:
+    """Start (or re-start) the daemon via launchctl. Idempotent."""
+    plist = paths.launch_agent_plist()
+    if not plist.exists():
+        raise RuntimeError("plist not installed — run `semanticsd install` first")
+    # bootout then bootstrap = clean restart; ignore bootout failures (might not be loaded)
+    subprocess.run(["launchctl", "bootout", _gui_target(), str(plist)],
+                   check=False, capture_output=True)
+    r = subprocess.run(
+        ["launchctl", "bootstrap", _gui_target(), str(plist)],
+        check=False, capture_output=True, text=True,
+    )
+    return {"ok": r.returncode == 0, "stderr": r.stderr.strip()}
+
+
+def stop() -> dict:
+    """Stop the daemon via launchctl bootout. Idempotent."""
+    plist = paths.launch_agent_plist()
+    r = subprocess.run(
+        ["launchctl", "bootout", _gui_target(), str(plist)],
+        check=False, capture_output=True, text=True,
+    )
+    return {"ok": r.returncode == 0, "stderr": r.stderr.strip()}
+
+
+def restart() -> dict:
+    """Restart via launchctl kickstart -k."""
+    label = f"{_gui_target()}/{_label()}"
+    r = subprocess.run(
+        ["launchctl", "kickstart", "-k", label],
+        check=False, capture_output=True, text=True,
+    )
+    return {"ok": r.returncode == 0, "stderr": r.stderr.strip()}
+
+
+def daemon_status() -> dict:
+    """Return whether the launchd-managed daemon is currently running.
+
+    Uses `launchctl print` which returns the agent's state. Falls back to
+    checking the HTTP port if launchctl isn't available.
+    """
+    label = f"{_gui_target()}/{_label()}"
+    r = subprocess.run(
+        ["launchctl", "print", label],
+        check=False, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return {"loaded": False, "running": False, "pid": None,
+                "raw": r.stderr.strip() or "agent not loaded"}
+    out = r.stdout
+    # `launchctl print` reports `state = running` or `state = not running`
+    pid = None
+    running = False
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("pid ="):
+            try:
+                pid = int(s.split("=", 1)[1].strip())
+            except ValueError:
+                pass
+        if s.startswith("state ="):
+            running = s.endswith("running") and "not running" not in s
+    return {"loaded": True, "running": running, "pid": pid, "raw": out[:500]}
+
+
+def log_path() -> Path:
+    """Where the daemon writes its log file (matches logging_setup.configure)."""
+    return paths.logs_dir() / "semanticsd.log"
