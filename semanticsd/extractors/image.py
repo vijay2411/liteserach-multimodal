@@ -1,13 +1,12 @@
-"""Image extractor — Tesseract OCR via pytesseract.
+"""Image extractor — emits a vision segment (raw bytes) and an OCR text fallback.
 
-Graceful degrade: if Tesseract binary is missing, returns a doc with no
-segments but an `ocr_error` in metadata.
+The vision segment is always produced (so a configured vision embedder can
+embed the image directly). The OCR text segment is best-effort: if Tesseract
+isn't installed or OCR fails, only the vision segment remains.
 """
 from __future__ import annotations
 import logging
 from pathlib import Path
-import pytesseract
-from PIL import Image
 from semanticsd.extractors.base import Extractor, ExtractedDoc, ExtractedSegment
 from semanticsd.extractors.registry import register
 
@@ -20,39 +19,46 @@ class ImageExtractor(Extractor):
     extensions = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".heic")
 
     def extract(self, path: Path) -> ExtractedDoc:
+        segments: list[ExtractedSegment] = []
+        metadata: dict = {}
+
         try:
+            raw = path.read_bytes()
+            descriptor = f"<image: {path.name}>"
+            segments.append(ExtractedSegment(
+                text=descriptor,
+                byte_start=0,
+                byte_end=len(descriptor.encode("utf-8")),
+                modality="vision",
+                image_data=raw,
+                metadata={"source_path": str(path)},
+            ))
+        except Exception as e:
+            log.warning("failed to read image bytes for %s: %s", path, e)
+            metadata["read_error"] = str(e)
+
+        try:
+            import pytesseract
+            from PIL import Image
             img = Image.open(str(path))
             text = pytesseract.image_to_string(img).strip()
-        except pytesseract.TesseractNotFoundError as e:
-            log.warning("Tesseract not installed; skipping OCR for %s", path)
-            return ExtractedDoc(
-                path=str(path),
-                file_type=self.file_type,
-                segments=[],
-                metadata={"ocr_error": "tesseract_not_found", "detail": str(e)},
-            )
+            if text:
+                segments.append(ExtractedSegment(
+                    text=text,
+                    byte_start=0,
+                    byte_end=len(text.encode("utf-8")),
+                    modality="text",
+                    metadata={"source": "ocr"},
+                ))
+            else:
+                metadata["ocr_error"] = "empty_result"
         except Exception as e:
-            log.warning("OCR failed for %s: %s", path, e)
-            return ExtractedDoc(
-                path=str(path),
-                file_type=self.file_type,
-                segments=[],
-                metadata={"ocr_error": "ocr_failure", "detail": str(e)},
-            )
+            log.debug("OCR skipped for %s: %s", path, e)
+            metadata.setdefault("ocr_error", str(e))
 
-        if not text:
-            return ExtractedDoc(
-                path=str(path),
-                file_type=self.file_type,
-                segments=[],
-                metadata={"ocr_error": "empty_result"},
-            )
         return ExtractedDoc(
             path=str(path),
             file_type=self.file_type,
-            segments=[ExtractedSegment(
-                text=text,
-                byte_start=0,
-                byte_end=len(text.encode("utf-8")),
-            )],
+            segments=segments,
+            metadata=metadata,
         )
